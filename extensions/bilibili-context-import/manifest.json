@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "音视频知识归档器 - 浏览器导入",
+  "version": "0.1.0",
+  "description": "用于从当前 B 站视频页采集上下文并提交到音视频知识归档器的侧载扩展。",
+  "permissions": ["activeTab", "scripting", "tabs"],
+  "host_permissions": ["https://www.bilibili.com/*", "http://localhost:3001/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.bilibili.com/video/*"],
+      "js": ["contentScript.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["injectedPageBridge.js"],
+      "matches": ["https://www.bilibili.com/*", "https://m.bilibili.com/*"]
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>浏览器导入（Beta）</title>
+    <style>
+      body {
+        margin: 0;
+        min-width: 320px;
+        padding: 16px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #0f172a;
+        color: #e2e8f0;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+
+      p {
+        margin: 0 0 10px;
+        font-size: 12px;
+        line-height: 1.6;
+        color: #cbd5e1;
+      }
+
+      button {
+        width: 100%;
+        border: 0;
+        border-radius: 14px;
+        padding: 10px 12px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        background: #2dd4bf;
+        color: #0f172a;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+
+      .panel {
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 16px;
+        background: rgba(15, 23, 42, 0.6);
+        padding: 12px;
+      }
+
+      .status {
+        margin-top: 12px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <h1 id="popupTitle"></h1>
+      <p id="popupSubtitle"></p>
+      <p id="pageStatus"></p>
+      <button id="submitButton" disabled></button>
+      <p class="status" id="statusText"></p>
+    </div>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
