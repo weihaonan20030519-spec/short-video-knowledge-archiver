@@ -72,7 +72,7 @@ describe("CreateRecordModal upload flow", () => {
     expect(screen.getByText("文件类型")).toBeInTheDocument();
     expect(screen.getByText("音频")).toBeInTheDocument();
     expect(screen.getByText("文件大小")).toBeInTheDocument();
-    expect(await screen.findByText("转写待校对")).toBeInTheDocument();
+    expect(await screen.findByText("转写完成")).toBeInTheDocument();
     expect(screen.getByText("转写完成，已自动填入原始内容区。")).toBeInTheDocument();
     expect(screen.getByDisplayValue("方法课音频")).toBeInTheDocument();
 
@@ -122,7 +122,7 @@ describe("CreateRecordModal upload flow", () => {
 
     await user.upload(screen.getByLabelText("Select a video or audio file"), file);
 
-    expect(await screen.findByText(/File Too Large/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/File Too Large/)).length).toBeGreaterThan(0);
     expect(screen.getByText("You Can Continue Editing Manually")).toBeInTheDocument();
     expect(screen.getByText("Transcription failed. Please retry or add the content manually.")).toBeInTheDocument();
     expect(mockedTranscribeFile).not.toHaveBeenCalled();
@@ -132,7 +132,16 @@ describe("CreateRecordModal upload flow", () => {
     useSettingsStore.getState().setAppLanguage("en");
     const mockedTranscribeFile = vi.mocked(transcribeFile);
     const pending = deferred<Awaited<ReturnType<typeof transcribeFile>>>();
-    mockedTranscribeFile.mockReturnValue(pending.promise);
+    let uploadCallbacks:
+      | {
+          onUploadStarted?: () => void;
+          onUploadComplete?: () => void;
+        }
+      | undefined;
+    mockedTranscribeFile.mockImplementation(async (_file, _languageHint, callbacks) => {
+      uploadCallbacks = callbacks;
+      return pending.promise;
+    });
 
     render(
       <CreateRecordModal
@@ -151,9 +160,17 @@ describe("CreateRecordModal upload flow", () => {
     await user.upload(screen.getByLabelText("Select a video or audio file"), file);
 
     expect(await screen.findByTestId("upload-status-card")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByText("Uploading").length).toBeGreaterThan(0);
+    });
+    uploadCallbacks?.onUploadComplete?.();
     expect(screen.getByTestId("upload-status-spinner")).toBeInTheDocument();
     expect(screen.getByText("demo.mp4")).toBeInTheDocument();
     expect(screen.getByText("Video")).toBeInTheDocument();
+    expect(screen.getByText("Current Status")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Processing")).toBeInTheDocument();
+    });
     expect(screen.getByText("Extracting Audio")).toBeInTheDocument();
     expect(screen.getAllByText("Transcribing").length).toBeGreaterThan(0);
     expect(screen.getByText("Processing has started. Keep this window open while the transcript is prepared.")).toBeInTheDocument();
@@ -178,7 +195,40 @@ describe("CreateRecordModal upload flow", () => {
       error: null
     });
 
-    expect(await screen.findByText("Transcript Needs Review")).toBeInTheDocument();
+    expect(await screen.findByText("Transcription Complete")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Demo Video")).toBeInTheDocument();
+  });
+
+  it("shows a localized timeout state when Gemini file activation times out", async () => {
+    useSettingsStore.getState().setAppLanguage("en");
+    const mockedTranscribeFile = vi.mocked(transcribeFile);
+    mockedTranscribeFile.mockResolvedValue({
+      success: false,
+      data: null,
+      error: {
+        code: "TRANSCRIPTION_TIMEOUT",
+        message: "Timed out waiting for Gemini file processing"
+      }
+    });
+
+    render(
+      <CreateRecordModal
+        open
+        folders={[createFolder({ id: "folder-4", name: "Inbox" })]}
+        tags={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    const user = userEvent.setup();
+    const file = new File(["audio"], "session.mp3", { type: "audio/mpeg" });
+    Object.defineProperty(file, "size", { value: 4 * 1024 * 1024 });
+
+    await user.upload(screen.getByLabelText("Select a video or audio file"), file);
+
+    expect(await screen.findByText("Processing Timed Out")).toBeInTheDocument();
+    expect(screen.getAllByText("Processing timed out. Please retry.").length).toBeGreaterThan(0);
+    expect(screen.getByText("You Can Continue Editing Manually")).toBeInTheDocument();
   });
 });

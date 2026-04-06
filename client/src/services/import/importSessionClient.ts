@@ -6,8 +6,9 @@ import type {
   BrowserContextImportSessionGetResponse,
   BrowserContextImportSubmitResponse
 } from "../../types/api";
+import { getApiBaseUrl } from "../apiBaseUrl";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
+const API_BASE_URL = getApiBaseUrl();
 
 async function readJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;

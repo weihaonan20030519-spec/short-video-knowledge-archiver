@@ -4,9 +4,7 @@ import type { TranscriptionProvider, TranscriptionProviderInput } from "./transc
 import { transcriptionProviderOutputSchema } from "../../schemas/transcriptionSchemas.js";
 import { ApiError } from "../../utils/errors.js";
 import { env, requireGeminiKey } from "../../utils/env.js";
-
-const FILE_READY_POLL_INTERVAL_MS = 750;
-const FILE_READY_POLL_ATTEMPTS = 20;
+import { logger } from "../../utils/logger.js";
 
 function buildTranscriptionPrompt(languageHint?: string | null) {
   return [
@@ -19,12 +17,15 @@ function buildTranscriptionPrompt(languageHint?: string | null) {
     "- warnings should be an array of short strings only when something is uncertain",
     "- segments and timestamps are optional; omit them if they are not reliable",
     "- do not summarize, translate, or reorganize the content",
+    "- if the transcript is in Chinese, output Simplified Chinese characters consistently",
     languageHint ? `Language hint: ${languageHint}` : "Language hint: none"
   ].join("\n");
 }
 
 async function waitForUploadedFile(client: GoogleGenAI, fileName: string) {
-  for (let attempt = 0; attempt < FILE_READY_POLL_ATTEMPTS; attempt += 1) {
+  const deadline = Date.now() + env.TRANSCRIPTION_FILE_READY_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
     const uploaded = await client.files.get({ name: fileName });
     if (uploaded.state === FileState.ACTIVE || uploaded.state == null) {
       return uploaded;
@@ -39,11 +40,13 @@ async function waitForUploadedFile(client: GoogleGenAI, fileName: string) {
     }
 
     await new Promise((resolve) => {
-      setTimeout(resolve, FILE_READY_POLL_INTERVAL_MS);
+      setTimeout(resolve, env.TRANSCRIPTION_FILE_READY_POLL_INTERVAL_MS);
     });
   }
 
-  throw new ApiError("TRANSCRIPTION_FAILED", "Timed out waiting for Gemini file processing", 504);
+  // TRANSCRIPTION_TIMEOUT is intentionally limited to the Gemini uploaded-file
+  // ready/active wait stage. It does not represent the entire transcription pipeline timing out.
+  throw new ApiError("TRANSCRIPTION_TIMEOUT", "Timed out waiting for Gemini file processing", 504);
 }
 
 function parseTranscriptionPayload(content: string) {
@@ -116,7 +119,12 @@ export class GeminiTranscriptionProvider implements TranscriptionProvider {
       return parsed.data;
     } finally {
       if (uploadedFile.name) {
-        await client.files.delete({ name: uploadedFile.name }).catch(() => undefined);
+        await client.files.delete({ name: uploadedFile.name }).catch((error) => {
+          logger.error("Failed to delete Gemini transcription file", {
+            fileName: uploadedFile.name,
+            error
+          });
+        });
       }
     }
   }

@@ -17,6 +17,7 @@ import {
   createAnalysisProvider,
   createTranscriptionProvider
 } from "./services/transcription/providerSelection.js";
+import { resolveAllowedAppOrigins } from "./utils/env.js";
 import { createHttpErrorResponse } from "./utils/httpErrorHandler.js";
 
 interface AppDependencies {
@@ -25,8 +26,21 @@ interface AppDependencies {
   audioExtractionService?: AudioExtractionService;
 }
 
+function isLocalDevelopmentOrigin(origin: string) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+}
+
+export function isAllowedCorsOrigin(origin: string | undefined, allowedAppOrigins = resolveAllowedAppOrigins()) {
+  if (!origin) {
+    return true;
+  }
+
+  return isLocalDevelopmentOrigin(origin) || allowedAppOrigins.includes(origin);
+}
+
 export function createApp(dependencies: AppDependencies = {}) {
   const app = express();
+  const allowedAppOrigins = resolveAllowedAppOrigins();
   const analysisProvider = dependencies.analysisProvider || createAnalysisProvider();
   const transcriptionProvider = dependencies.transcriptionProvider || createTranscriptionProvider();
   const audioExtractionService =
@@ -34,7 +48,14 @@ export function createApp(dependencies: AppDependencies = {}) {
 
   app.use(
     cors({
-      origin: true
+      origin(origin, callback) {
+        if (isAllowedCorsOrigin(origin, allowedAppOrigins)) {
+          callback(null, true);
+          return;
+        }
+
+        callback(new Error(`Origin ${origin} is not allowed by CORS`));
+      }
     })
   );
   app.use(express.json({ limit: "1mb" }));

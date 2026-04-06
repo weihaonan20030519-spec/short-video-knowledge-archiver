@@ -1,6 +1,7 @@
 import type { BilibiliImportRequestBody, BilibiliImportResponse } from "../../types/api";
+import { getApiBaseUrl } from "../apiBaseUrl";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
+const API_BASE_URL = getApiBaseUrl();
 
 export async function importBilibiliLink(
   url: string,
@@ -21,4 +22,3 @@ export async function importBilibiliLink(
 
   return (await response.json()) as BilibiliImportResponse;
 }
-

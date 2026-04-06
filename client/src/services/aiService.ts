@@ -1,7 +1,8 @@
 import type { AnalyzeMode, AppLanguage, ConciseOutput, LearningOutput, RecordItem } from "../types/domain";
 import type { AnalyzeRequestBody, AnalyzeResponse } from "../types/api";
+import { getApiBaseUrl } from "./apiBaseUrl";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
+const API_BASE_URL = getApiBaseUrl();
 
 export async function analyzeRecord(
   record: RecordItem,

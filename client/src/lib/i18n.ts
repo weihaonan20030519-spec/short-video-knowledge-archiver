@@ -13,6 +13,7 @@ import type {
   TranscriptionErrorCode
 } from "../types/api";
 import type { ImportIssueCode } from "../services/import/importTypes";
+import type { UploadUiStatus } from "../services/transcription/transcriptionTypes";
 
 export const APP_LANGUAGE_STORAGE_KEY = "svka:app-language";
 
@@ -183,13 +184,17 @@ type Dictionary = {
     uploadInputLabel: string;
     uploadHint: (sizeLimitMb: number, minutes: number) => string;
     uploadStatusCardTitle: string;
+    uploadCurrentStatus: string;
     uploadCurrentStep: string;
     uploadSteps: string;
     uploadFileSelected: string;
     uploadProcessingDescription: string;
     uploadSuccessDescription: string;
     uploadFailureDescription: string;
+    uploadTimeoutDescription: string;
+    uploadLargeFileHint: string;
     uploadFileSize: string;
+    uploadStateLabel: Record<Exclude<UploadUiStatus, "idle">, string>;
     otherImportMethods: string;
     originalTranscript: string;
     retryTranscription: string;
@@ -293,6 +298,7 @@ type Dictionary = {
     aiRequestFailed: string;
     unsupportedFileFormat: string;
     fileTooLarge: (sizeLimitMb: number) => string;
+    transcriptionTimeout: string;
     transcriptionFailed: string;
     youCanContinueEditingManually: string;
     noTranscriptAvailable: string;
@@ -442,13 +448,24 @@ export const messages: Record<AppLanguage, Dictionary> = {
       uploadHint: (sizeLimitMb, minutes) =>
         `P0 仅支持单文件上传，建议上传 ${minutes} 分钟内、${sizeLimitMb}MB 以内的音视频。`,
       uploadStatusCardTitle: "转写状态卡片",
+      uploadCurrentStatus: "当前状态",
       uploadCurrentStep: "当前步骤",
       uploadSteps: "处理步骤",
       uploadFileSelected: "已选择文件",
       uploadProcessingDescription: "系统已开始处理，请稍候，原始内容区会在转写完成后自动填入。",
       uploadSuccessDescription: "转写完成，已自动填入原始内容区。",
       uploadFailureDescription: "转写失败，请重试或手动补充内容。",
+      uploadTimeoutDescription: "处理超时，请重试。",
+      uploadLargeFileHint: "文件较大，处理可能需要更久。",
       uploadFileSize: "文件大小",
+      uploadStateLabel: {
+        uploading: "上传中",
+        processing: "处理中",
+        success: "转写完成",
+        timeout: "处理超时",
+        too_large: "文件过大",
+        failed: "转写失败"
+      },
       otherImportMethods: "其他导入方式",
       originalTranscript: "原始转写文本",
       retryTranscription: "重新转写",
@@ -560,6 +577,7 @@ export const messages: Record<AppLanguage, Dictionary> = {
       aiRequestFailed: "AI 请求失败，请检查服务状态后重试。",
       unsupportedFileFormat: "文件格式不受支持，请上传音频或视频文件。",
       fileTooLarge: (sizeLimitMb) => `文件过大，请上传 ${sizeLimitMb}MB 以内的单个文件。`,
+      transcriptionTimeout: "处理超时，请重试。",
       transcriptionFailed: "转写失败，请重试。",
       youCanContinueEditingManually: "你仍可继续手动编辑原始内容。",
       noTranscriptAvailable: "暂无可用转写文本。",
@@ -737,13 +755,24 @@ export const messages: Record<AppLanguage, Dictionary> = {
       uploadHint: (sizeLimitMb, minutes) =>
         `P0 supports one file at a time. Use a file within ${minutes} minutes and ${sizeLimitMb}MB for the most stable result.`,
       uploadStatusCardTitle: "Transcription Status",
+      uploadCurrentStatus: "Current Status",
       uploadCurrentStep: "Current Step",
       uploadSteps: "Workflow",
       uploadFileSelected: "File Selected",
       uploadProcessingDescription: "Processing has started. Keep this window open while the transcript is prepared.",
       uploadSuccessDescription: "Transcription is complete and has been added to the Original Content field.",
       uploadFailureDescription: "Transcription failed. Please retry or add the content manually.",
+      uploadTimeoutDescription: "Processing timed out. Please retry.",
+      uploadLargeFileHint: "Larger files can take longer to process.",
       uploadFileSize: "File Size",
+      uploadStateLabel: {
+        uploading: "Uploading",
+        processing: "Processing",
+        success: "Transcription Complete",
+        timeout: "Processing Timed Out",
+        too_large: "File Too Large",
+        failed: "Transcription Failed"
+      },
       otherImportMethods: "Other import methods",
       originalTranscript: "Original Transcript",
       retryTranscription: "Retry Transcription",
@@ -857,6 +886,7 @@ export const messages: Record<AppLanguage, Dictionary> = {
       aiRequestFailed: "The AI request failed. Check the service and try again.",
       unsupportedFileFormat: "Unsupported File Format",
       fileTooLarge: (sizeLimitMb) => `File Too Large. Upload a single file within ${sizeLimitMb}MB.`,
+      transcriptionTimeout: "Processing timed out. Please retry.",
       transcriptionFailed: "Transcription Failed",
       youCanContinueEditingManually: "You Can Continue Editing Manually",
       noTranscriptAvailable: "No Transcript Available",
@@ -989,6 +1019,10 @@ export function getTranscriptionErrorMessage(
 
   if (code === "FILE_TOO_LARGE") {
     return target.fileTooLarge(sizeLimitMb);
+  }
+
+  if (code === "TRANSCRIPTION_TIMEOUT") {
+    return target.transcriptionTimeout;
   }
 
   if (code === "TRANSCRIPTION_FAILED" || code === "AUDIO_EXTRACTION_FAILED") {

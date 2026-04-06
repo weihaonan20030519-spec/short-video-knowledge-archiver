@@ -22,10 +22,12 @@ import {
   inferSourceTypeFromFileName,
   isSupportedTranscriptionFile,
   SUPPORTED_TRANSCRIPTION_ACCEPT,
+  LARGE_FILE_HINT_THRESHOLD_BYTES,
   TRANSCRIPTION_MAX_FILE_SIZE_BYTES,
   TRANSCRIPTION_RECOMMENDED_MAX_MINUTES,
   type ClientTranscriptionError,
-  type ClientTranscriptionResult
+  type ClientTranscriptionResult,
+  type UploadUiStatus
 } from "../../services/transcription/transcriptionTypes";
 import { createRecordSchema, type CreateRecordValues } from "../../types/forms";
 import type { Folder, Tag, TranscriptionStatus } from "../../types/domain";
@@ -141,18 +143,18 @@ function deriveBrowserImportTerminalStatus(result: ImportResult | null): Exclude
   return "incomplete";
 }
 
-function uploadStatusTone(status: TranscriptionStatus) {
+function uploadStatusTone(status: UploadUiStatus) {
   switch (status) {
-    case "file_uploaded":
+    case "uploading":
       return "border-sky-200 bg-sky-50 text-sky-700";
-    case "extracting_audio":
-      return "border-indigo-200 bg-indigo-50 text-indigo-700";
-    case "transcribing":
+    case "processing":
       return "border-amber-200 bg-amber-50 text-amber-700";
-    case "transcript_ready":
-    case "transcript_needs_review":
+    case "success":
       return "border-emerald-200 bg-emerald-50 text-emerald-700";
-    case "transcript_failed":
+    case "timeout":
+      return "border-orange-200 bg-orange-50 text-orange-700";
+    case "too_large":
+    case "failed":
       return "border-rose-200 bg-rose-50 text-rose-700";
     default:
       return "border-slate-200 bg-slate-50 text-slate-700";
@@ -171,25 +173,21 @@ function formatFileSize(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-type UploadStepState = "complete" | "current" | "upcoming";
-
 interface UploadWorkflowStep {
   key: string;
   label: string;
-  state: UploadStepState;
 }
 
 function buildUploadWorkflowSteps(
   sourceType: "audio" | "video" | null,
-  status: TranscriptionStatus,
   stepLabels: {
-    selected: string;
+    uploading: string;
     extracting: string;
     transcribing: string;
   }
 ): UploadWorkflowStep[] {
-  const baseSteps: Array<{ key: string; label: string }> = [
-    { key: "file_uploaded", label: stepLabels.selected }
+  const baseSteps: UploadWorkflowStep[] = [
+    { key: "uploading", label: stepLabels.uploading }
   ];
 
   if (sourceType === "video") {
@@ -198,31 +196,7 @@ function buildUploadWorkflowSteps(
 
   baseSteps.push({ key: "transcribing", label: stepLabels.transcribing });
 
-  const activeKey =
-    status === "extracting_audio"
-      ? "extracting_audio"
-      : status === "transcribing"
-        ? "transcribing"
-        : "file_uploaded";
-
-  const activeIndex = baseSteps.findIndex((step) => step.key === activeKey);
-  const completedIndex =
-    status === "transcript_ready" || status === "transcript_needs_review"
-      ? baseSteps.length - 1
-      : status === "transcript_failed"
-        ? Math.max(activeIndex - 1, 0)
-        : activeIndex - 1;
-
-  return baseSteps.map((step, index) => {
-    const state: UploadStepState =
-      index <= completedIndex ? "complete" : index === activeIndex ? "current" : "upcoming";
-
-    return {
-      key: step.key,
-      label: step.label,
-      state
-    };
-  });
+  return baseSteps;
 }
 
 export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: CreateRecordModalProps) {
@@ -261,16 +235,23 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
     startedAt: null
   });
   const [transcriptionStatus, setTranscriptionStatus] = useState<TranscriptionStatus>("idle");
+  const [uploadUiStatus, setUploadUiStatus] = useState<UploadUiStatus>("idle");
   const [transcriptionResult, setTranscriptionResult] = useState<ClientTranscriptionResult | null>(null);
   const [transcriptionError, setTranscriptionError] = useState<ClientTranscriptionError | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [selectedFileSize, setSelectedFileSize] = useState<number | null>(null);
   const [selectedFileSourceType, setSelectedFileSourceType] = useState<"audio" | "video" | null>(null);
+  const activeTranscriptionRequestRef = useRef(0);
   const lastSeenUrlRef = useRef<string | null>(null);
   const lastImportedValueRef = useRef<{ title: string; content: string; url: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const invalidateTranscriptionRequest = () => {
+    activeTranscriptionRequestRef.current += 1;
+  };
+
   const resetModalState = () => {
+    invalidateTranscriptionRequest();
     reset({
       inputMethod: "upload",
       title: "",
@@ -289,6 +270,7 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
       startedAt: null
     });
     setTranscriptionStatus("idle");
+    setUploadUiStatus("idle");
     setTranscriptionResult(null);
     setTranscriptionError(null);
     setSelectedFileName(null);
@@ -299,6 +281,11 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+  };
+
+  const handleClose = () => {
+    invalidateTranscriptionRequest();
+    onClose();
   };
 
   const applyAutofill = (nextValues: { title?: string; content?: string; url?: string }) => {
@@ -358,6 +345,13 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
       lastImportedValueRef.current = null;
     }
   }, [open, originalUrl, reset]);
+
+  useEffect(() => {
+    if (inputMethod !== "upload") {
+      invalidateTranscriptionRequest();
+      setUploadUiStatus("idle");
+    }
+  }, [inputMethod]);
 
   useEffect(() => {
     if (!open || (inputMethod !== "text" && inputMethod !== "manual")) {
@@ -531,21 +525,26 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
   const selectedSourceTypeLabel = selectedFileSourceType
     ? getSourceTypeLabel(selectedFileSourceType, appLanguage)
     : t.common.emptyValue;
-  const uploadWorkflowSteps = buildUploadWorkflowSteps(selectedFileSourceType, transcriptionStatus, {
-    selected: t.modals.uploadFileSelected,
+  const uploadWorkflowSteps = buildUploadWorkflowSteps(selectedFileSourceType, {
+    uploading: t.modals.uploadStateLabel.uploading,
     extracting: t.modals.transcriptionStatus.extracting_audio,
     transcribing: t.modals.transcriptionStatus.transcribing
   });
-  const isUploadProcessing =
-    transcriptionStatus === "file_uploaded" ||
-    transcriptionStatus === "extracting_audio" ||
-    transcriptionStatus === "transcribing";
+  const isUploadProcessing = uploadUiStatus === "uploading" || uploadUiStatus === "processing";
   const uploadStatusDescription =
-    transcriptionStatus === "transcript_failed"
+    uploadUiStatus === "timeout"
+      ? t.modals.uploadTimeoutDescription
+      : uploadUiStatus === "too_large" || uploadUiStatus === "failed"
       ? t.modals.uploadFailureDescription
-      : transcriptionStatus === "transcript_ready" || transcriptionStatus === "transcript_needs_review"
+      : uploadUiStatus === "success"
         ? t.modals.uploadSuccessDescription
         : t.modals.uploadProcessingDescription;
+  const currentUploadStatusLabel =
+    uploadUiStatus === "idle" ? null : t.modals.uploadStateLabel[uploadUiStatus];
+  const shouldShowLargeFileHint =
+    selectedFileSize != null &&
+    selectedFileSize >= LARGE_FILE_HINT_THRESHOLD_BYTES &&
+    (uploadUiStatus === "uploading" || uploadUiStatus === "processing");
 
   const triggerBrowserImport = async () => {
     setValue("inputMethod", "link", { shouldDirty: true });
@@ -590,6 +589,7 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
   };
 
   const handleFileSelection = async (file: File | null) => {
+    invalidateTranscriptionRequest();
     setTranscriptionResult(null);
     setTranscriptionError(null);
 
@@ -598,16 +598,23 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
       setSelectedFileSize(null);
       setSelectedFileSourceType(null);
       setTranscriptionStatus("idle");
+      setUploadUiStatus("idle");
       return;
     }
 
+    const requestId = activeTranscriptionRequestRef.current;
+    const isCurrentRequest = () => activeTranscriptionRequestRef.current === requestId;
+    const inferredSourceType = inferSourceTypeFromFileName(file.name);
+
     setSelectedFileName(file.name);
     setSelectedFileSize(file.size);
-    setTranscriptionStatus("file_uploaded");
+    setSelectedFileSourceType(inferredSourceType);
+    setTranscriptionStatus("idle");
+    setUploadUiStatus("uploading");
 
     if (!isSupportedTranscriptionFile(file)) {
-      setSelectedFileSourceType(null);
       setTranscriptionStatus("transcript_failed");
+      setUploadUiStatus("failed");
       setTranscriptionError({
         code: "UNSUPPORTED_FILE_FORMAT",
         message: "unsupported"
@@ -617,6 +624,7 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
 
     if (file.size > TRANSCRIPTION_MAX_FILE_SIZE_BYTES) {
       setTranscriptionStatus("transcript_failed");
+      setUploadUiStatus("too_large");
       setTranscriptionError({
         code: "FILE_TOO_LARGE",
         message: "too large"
@@ -624,19 +632,36 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
       return;
     }
 
-    const inferredSourceType = inferSourceTypeFromFileName(file.name);
-    setSelectedFileSourceType(inferredSourceType);
-    if (inferredSourceType === "video") {
-      setTranscriptionStatus("extracting_audio");
-      await Promise.resolve();
+    const response = await transcribeFile(file, appLanguage, {
+      onUploadStarted: () => {
+        if (!isCurrentRequest()) {
+          return;
+        }
+
+        setUploadUiStatus("uploading");
+      },
+      onUploadComplete: () => {
+        if (!isCurrentRequest()) {
+          return;
+        }
+
+        setUploadUiStatus("processing");
+      }
+    });
+
+    if (!isCurrentRequest()) {
+      return;
     }
-
-    setTranscriptionStatus("transcribing");
-
-    const response = await transcribeFile(file, appLanguage);
 
     if (!response.success) {
       setTranscriptionStatus("transcript_failed");
+      setUploadUiStatus(
+        response.error.code === "TRANSCRIPTION_TIMEOUT"
+          ? "timeout"
+          : response.error.code === "FILE_TOO_LARGE"
+            ? "too_large"
+            : "failed"
+      );
       setTranscriptionError(response.error);
       return;
     }
@@ -662,6 +687,7 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
 
     setTranscriptionResult(nextResult);
     setTranscriptionStatus("transcript_needs_review");
+    setUploadUiStatus("success");
     applyAutofill({
       title: nextResult.suggestedTitle,
       content: nextResult.transcriptText,
@@ -690,7 +716,7 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
           </div>
           <button
             className="shrink-0 rounded-xl px-2 py-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
-            onClick={onClose}
+            onClick={handleClose}
             type="button"
           >
             {t.common.close}
@@ -803,13 +829,16 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
                   {selectedFileName ? (
                     <div
                       aria-live="polite"
-                      className={`rounded-3xl border px-4 py-4 shadow-subtle ${uploadStatusTone(transcriptionStatus)}`}
+                      className={`rounded-3xl border px-4 py-4 shadow-subtle ${uploadStatusTone(uploadUiStatus)}`}
                       data-testid="upload-status-card"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-semibold text-slate-900">{t.modals.uploadStatusCardTitle}</p>
                           <p className="mt-1 text-xs leading-5 text-slate-600">{uploadStatusDescription}</p>
+                          {shouldShowLargeFileHint ? (
+                            <p className="mt-2 text-xs leading-5 text-slate-500">{t.modals.uploadLargeFileHint}</p>
+                          ) : null}
                         </div>
                         {isUploadProcessing ? (
                           <span
@@ -837,7 +866,7 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
 
                       <div className="mt-4 rounded-2xl border border-white/40 bg-white/70 px-3 py-3">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                          {t.modals.uploadCurrentStep}
+                          {t.modals.uploadCurrentStatus}
                         </p>
                         <div className="mt-2 flex items-center gap-2">
                           {isUploadProcessing ? (
@@ -849,12 +878,16 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
                             <span
                               aria-hidden="true"
                               className={`inline-flex h-2.5 w-2.5 rounded-full ${
-                                transcriptionStatus === "transcript_failed" ? "bg-rose-500" : "bg-emerald-500"
+                                uploadUiStatus === "timeout"
+                                  ? "bg-orange-500"
+                                  : uploadUiStatus === "too_large" || uploadUiStatus === "failed"
+                                    ? "bg-rose-500"
+                                    : "bg-emerald-500"
                               }`}
                             />
                           )}
                           <p className="text-sm font-medium text-slate-900">
-                            {t.modals.transcriptionStatus[transcriptionStatus]}
+                            {currentUploadStatusLabel}
                           </p>
                         </div>
                       </div>
@@ -865,26 +898,9 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
                         </p>
                         <div className="mt-3 space-y-2">
                           {uploadWorkflowSteps.map((step) => (
-                            <div key={step.key} className="flex items-center gap-3 text-sm">
-                              <span
-                                aria-hidden="true"
-                                className={`inline-flex h-2.5 w-2.5 rounded-full ${
-                                  step.state === "complete"
-                                    ? "bg-emerald-500"
-                                    : step.state === "current"
-                                      ? "bg-amber-500 shadow-[0_0_0_4px_rgba(251,191,36,0.18)]"
-                                      : "bg-slate-300"
-                                }`}
-                              />
-                              <span
-                                className={
-                                  step.state === "upcoming"
-                                    ? "text-slate-500"
-                                    : "font-medium text-slate-900"
-                                }
-                              >
-                                {step.label}
-                              </span>
+                            <div key={step.key} className="flex items-center gap-3 text-sm text-slate-700">
+                              <span aria-hidden="true" className="inline-flex h-2.5 w-2.5 rounded-full bg-slate-300" />
+                              <span>{step.label}</span>
                             </div>
                           ))}
                         </div>
@@ -1066,7 +1082,7 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
           >
             <button
               className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-medium text-slate-700"
-              onClick={onClose}
+              onClick={handleClose}
               type="button"
             >
               {t.common.cancel}
@@ -1075,8 +1091,8 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
               className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
               disabled={
                 (importSession.flowState === "fetching_remote_content" && activeProvider !== "browser_context") ||
-                transcriptionStatus === "extracting_audio" ||
-                transcriptionStatus === "transcribing"
+                uploadUiStatus === "uploading" ||
+                uploadUiStatus === "processing"
               }
               type="submit"
             >

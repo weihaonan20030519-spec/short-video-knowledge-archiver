@@ -5,7 +5,8 @@ import type {
 } from "../../types/api";
 import type { TranscriptSegment, TranscriptTimestamp } from "../../types/domain";
 
-export const TRANSCRIPTION_MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024;
+export const TRANSCRIPTION_MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+export const LARGE_FILE_HINT_THRESHOLD_BYTES = 25 * 1024 * 1024;
 export const TRANSCRIPTION_RECOMMENDED_MAX_MINUTES = 15;
 export const SUPPORTED_TRANSCRIPTION_ACCEPT = ".mp3,.wav,.m4a,.aac,.ogg,.mp4,.mov,.webm";
 
@@ -36,6 +37,20 @@ export interface ClientTranscriptionResult {
 export interface ClientTranscriptionError {
   code: TranscriptionErrorCode;
   message: string;
+}
+
+export type UploadUiStatus =
+  | "idle"
+  | "uploading"
+  | "processing"
+  | "success"
+  | "timeout"
+  | "too_large"
+  | "failed";
+
+export interface TranscriptionRequestCallbacks {
+  onUploadStarted?: () => void;
+  onUploadComplete?: () => void;
 }
 
 function getFileExtension(fileName: string) {

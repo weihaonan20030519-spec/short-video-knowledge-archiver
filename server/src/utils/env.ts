@@ -8,10 +8,13 @@ const envSchema = z.object({
   GEMINI_MODEL_CONCISE: z.string().default("gemini-2.5-flash-lite"),
   GEMINI_MODEL_LEARNING: z.string().default("gemini-2.5-flash"),
   GEMINI_MODEL_TRANSCRIPTION: z.string().default("gemini-2.5-flash"),
+  APP_ORIGIN: z.string().optional(),
   TRANSCRIPTION_PROVIDER: z.enum(["gemini"]).default("gemini"),
   ANALYSIS_PROVIDER: z.enum(["gemini"]).default("gemini"),
-  TRANSCRIPTION_MAX_FILE_SIZE_MB: z.coerce.number().int().positive().default(25),
+  TRANSCRIPTION_MAX_FILE_SIZE_MB: z.coerce.number().int().positive().default(50),
   TRANSCRIPTION_RECOMMENDED_MAX_MINUTES: z.coerce.number().int().positive().default(15),
+  TRANSCRIPTION_FILE_READY_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1000),
+  TRANSCRIPTION_FILE_READY_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
   PORT: z.coerce.number().int().positive().default(3001),
   MIN_RAW_TEXT_LENGTH: z.coerce.number().int().positive().default(30)
 });
@@ -24,6 +27,13 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+export function resolveAllowedAppOrigins() {
+  return (env.APP_ORIGIN || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
 
 export function resolveAnalyzeModel(mode: "concise" | "learning") {
   if (mode === "concise") {

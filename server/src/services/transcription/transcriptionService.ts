@@ -6,6 +6,7 @@ import { normalizeTranscriptResult } from "./normalizeTranscriptResult.js";
 import { validateMediaFile } from "./mediaValidation.js";
 import type { TranscriptionResponse } from "../../schemas/transcriptionSchemas.js";
 import { ApiError } from "../../utils/errors.js";
+import { logger } from "../../utils/logger.js";
 
 export interface UploadedTranscriptionFile {
   path: string;
@@ -28,7 +29,16 @@ async function safeUnlink(filePath: string | null | undefined) {
     return;
   }
 
-  await fs.unlink(filePath).catch(() => undefined);
+  await fs.unlink(filePath).catch((error) => {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return;
+    }
+
+    logger.error("Failed to clean up transcription temp file", {
+      filePath,
+      error
+    });
+  });
 }
 
 export async function transcribeUploadedFile(
@@ -76,6 +86,7 @@ export async function transcribeUploadedFile(
         size: file.size
       },
       providerName: dependencies.transcriptionProvider.name,
+      languageHint: options.languageHint,
       providerOutput: {
         ...providerOutput,
         warnings: [

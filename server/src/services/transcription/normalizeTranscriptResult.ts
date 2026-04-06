@@ -6,6 +6,7 @@ import type {
   TranscriptionResponse,
   TranscriptionSourceType
 } from "../../schemas/transcriptionSchemas.js";
+import { normalizeChineseTranscriptScript } from "./chineseScriptNormalization.js";
 
 function buildSuggestedTitle(fileName: string) {
   const baseName = path.basename(fileName, path.extname(fileName));
@@ -17,8 +18,12 @@ export function normalizeTranscriptResult(input: {
   fileMeta: TranscriptFileMeta;
   providerName: string;
   providerOutput: TranscriptionProviderOutput;
+  languageHint?: string | null;
 }): TranscriptionResponse {
-  const warnings = [...input.providerOutput.warnings];
+  const normalizedOutput = normalizeChineseTranscriptScript(input.providerOutput, {
+    languageHint: input.languageHint
+  });
+  const warnings = [...normalizedOutput.warnings];
 
   if (!warnings.length) {
     warnings.push("Review the transcript for accuracy before organizing it.");
@@ -27,10 +32,10 @@ export function normalizeTranscriptResult(input: {
   return {
     sourceType: input.sourceType,
     suggestedTitle: buildSuggestedTitle(input.fileMeta.fileName),
-    transcriptText: input.providerOutput.transcriptText,
-    segments: input.providerOutput.segments,
-    timestamps: input.providerOutput.timestamps,
-    language: input.providerOutput.language ?? null,
+    transcriptText: normalizedOutput.transcriptText,
+    segments: normalizedOutput.segments,
+    timestamps: normalizedOutput.timestamps,
+    language: normalizedOutput.language ?? null,
     fileMeta: input.fileMeta,
     transcriptionStatus: "transcript_needs_review",
     warnings: warnings.map((warning) => warning.trim()).filter(Boolean)
