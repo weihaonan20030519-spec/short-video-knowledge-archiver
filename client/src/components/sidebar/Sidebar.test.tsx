@@ -96,4 +96,25 @@ describe("Sidebar", () => {
 
     expect(screen.getByTestId("tag-item-tag-1")).toHaveClass("cursor-pointer");
   });
+
+  it("keeps the entire sidebar scrollable while preserving a protected collections region", () => {
+    render(
+      <Sidebar
+        folders={[createFolder({ id: "folder-1", name: "研究素材" })]}
+        uncategorizedCount={0}
+        tags={[createTag({ id: "tag-1", name: "方法" })]}
+        onOpenCreate={vi.fn()}
+        onCreateFolder={vi.fn()}
+        onCreateTag={vi.fn()}
+        onRenameFolder={vi.fn()}
+        onDeleteFolder={vi.fn()}
+        onRenameTag={vi.fn()}
+        onDeleteTag={vi.fn()}
+        onExportFolder={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId("sidebar-pane")).toHaveClass("overflow-y-auto");
+    expect(screen.getByTestId("sidebar-collections-region")).toHaveClass("min-h-[18rem]");
+  });
 });

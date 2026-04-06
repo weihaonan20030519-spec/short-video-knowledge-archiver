@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import type { Folder, RecordItem, Tag } from "../types/domain";
 import { isRecordUncategorized, isUncategorizedRecordsView } from "../lib/folders";
 import { buildRecordSearchText } from "../lib/search";
+import { matchesRecordStageFilter } from "../lib/status";
 import { useQueryStore } from "../stores/queryStore";
 
 export function useRecordFilters(records: RecordItem[], tags: Tag[], folders: Folder[]) {
@@ -19,16 +20,8 @@ export function useRecordFilters(records: RecordItem[], tags: Tag[], folders: Fo
         }
       }
 
-      if (activeFilter === "unorganized") {
-        if (!(record.aiStatus === "not_started" || record.aiStatus === "failed")) {
-          return false;
-        }
-      }
-
-      if (activeFilter === "needs_review") {
-        if (record.transcriptionStatus !== "transcript_needs_review") {
-          return false;
-        }
+      if ((activeFilter === "unorganized" || activeFilter === "needs_review") && !matchesRecordStageFilter(record, activeFilter)) {
+        return false;
       }
 
       if (selectedFolderId) {

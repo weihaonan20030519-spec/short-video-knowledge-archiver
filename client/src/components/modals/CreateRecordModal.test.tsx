@@ -174,8 +174,10 @@ describe("CreateRecordModal upload flow", () => {
     await waitFor(() => {
       expect(screen.getByText("Processing")).toBeInTheDocument();
     });
-    expect(screen.getByText("Extracting Audio")).toBeInTheDocument();
-    expect(screen.getAllByText("Transcribing").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("upload-workflow-step-upload")).toHaveAttribute("data-step-state", "done");
+    expect(screen.getByTestId("upload-workflow-step-process")).toHaveAttribute("data-step-state", "current");
+    expect(screen.getByText("Upload")).toBeInTheDocument();
+    expect(screen.getByText("Processing includes audio extraction and transcription.")).toBeInTheDocument();
     expect(screen.getByText("Processing has started. Keep this window open while the transcript is prepared.")).toBeInTheDocument();
 
     pending.resolve({
@@ -202,6 +204,8 @@ describe("CreateRecordModal upload flow", () => {
 
     expect(await screen.findByText("Transcription Complete")).toBeInTheDocument();
     const uploadStatusCard = screen.getByTestId("upload-status-card");
+    expect(screen.getByTestId("upload-workflow-step-upload")).toHaveAttribute("data-step-state", "done");
+    expect(screen.getByTestId("upload-workflow-step-process")).toHaveAttribute("data-step-state", "done");
     expect(
       within(uploadStatusCard).getByText((_, element) =>
         element?.tagName === "P" &&
@@ -245,6 +249,8 @@ describe("CreateRecordModal upload flow", () => {
 
     expect(await screen.findByText("Processing Timed Out")).toBeInTheDocument();
     const uploadStatusCard = screen.getByTestId("upload-status-card");
+    expect(screen.getByTestId("upload-workflow-step-upload")).toHaveAttribute("data-step-state", "failed");
+    expect(screen.getByTestId("upload-workflow-step-transcribe")).toHaveAttribute("data-step-state", "pending");
     expect(
       within(uploadStatusCard).getByText((_, element) =>
         element?.tagName === "P" &&

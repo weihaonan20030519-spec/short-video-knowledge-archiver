@@ -187,6 +187,10 @@ type Dictionary = {
     uploadCurrentStatus: string;
     uploadCurrentStep: string;
     uploadSteps: string;
+    uploadWorkflowLabelUpload: string;
+    uploadWorkflowLabelTranscribe: string;
+    uploadWorkflowLabelProcess: string;
+    uploadWorkflowVideoHelper: string;
     uploadModelUsed: string;
     uploadModelAttempts: string;
     uploadModelFallback: string;
@@ -455,6 +459,10 @@ export const messages: Record<AppLanguage, Dictionary> = {
       uploadCurrentStatus: "当前状态",
       uploadCurrentStep: "当前步骤",
       uploadSteps: "处理步骤",
+      uploadWorkflowLabelUpload: "上传",
+      uploadWorkflowLabelTranscribe: "转写",
+      uploadWorkflowLabelProcess: "处理",
+      uploadWorkflowVideoHelper: "处理包含提取音频与转写。",
       uploadModelUsed: "转写模型",
       uploadModelAttempts: "转写尝试模型",
       uploadModelFallback: "自动回退",
@@ -766,6 +774,10 @@ export const messages: Record<AppLanguage, Dictionary> = {
       uploadCurrentStatus: "Current Status",
       uploadCurrentStep: "Current Step",
       uploadSteps: "Workflow",
+      uploadWorkflowLabelUpload: "Upload",
+      uploadWorkflowLabelTranscribe: "Transcribe",
+      uploadWorkflowLabelProcess: "Processing",
+      uploadWorkflowVideoHelper: "Processing includes audio extraction and transcription.",
       uploadModelUsed: "Transcription Model",
       uploadModelAttempts: "Transcription Model Attempts",
       uploadModelFallback: "Auto fallback",

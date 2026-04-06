@@ -3,10 +3,7 @@ import { useAppI18n } from "../../hooks/useAppI18n";
 import { getFolderDisplayName, getSourceTypeLabel } from "../../lib/i18n";
 import { getPlatformLabel } from "../../lib/platform";
 import {
-  getStatusLabel,
-  getTranscriptionStatusLabel,
-  statusToneMap,
-  transcriptionStatusToneMap
+  getRecordListStatus
 } from "../../lib/status";
 import { formatDateTime } from "../../lib/time";
 
@@ -21,6 +18,7 @@ interface RecordListItemProps {
 export function RecordListItem({ record, folders, tags, selected, onClick }: RecordListItemProps) {
   const { appLanguage, t } = useAppI18n();
   const folder = folders.find((item) => item.id === record.folderId);
+  const derivedStatus = getRecordListStatus(record, appLanguage);
   const tagNames = tags
     .filter((tag) => record.tagIds.includes(tag.id))
     .slice(0, 3)
@@ -45,18 +43,13 @@ export function RecordListItem({ record, folders, tags, selected, onClick }: Rec
           </p>
         </div>
         <span
-          className={`rounded-full px-3 py-1 text-xs font-medium ${statusToneMap[record.aiStatus]}`}
+          className={`rounded-full px-3 py-1 text-xs font-medium ${derivedStatus.tone}`}
         >
-          {getStatusLabel(record.aiStatus, appLanguage)}
+          {derivedStatus.label}
         </span>
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
-        <span
-          className={`rounded-full px-2 py-1 text-[11px] font-medium ${transcriptionStatusToneMap[record.transcriptionStatus]}`}
-        >
-          {getTranscriptionStatusLabel(record.transcriptionStatus, appLanguage)}
-        </span>
         {tagNames.map((tagName) => (
           <span key={tagName} className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">
             #{tagName}
