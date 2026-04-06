@@ -30,6 +30,7 @@ export type TranscriptionErrorCode =
   | "FILE_TOO_LARGE"
   | "AUDIO_EXTRACTION_FAILED"
   | "TRANSCRIPTION_TIMEOUT"
+  | "TRANSCRIPTION_QUOTA_EXCEEDED"
   | "TRANSCRIPTION_FAILED"
   | "INTERNAL_ERROR";
 
@@ -146,9 +147,13 @@ export interface TranscriptionSuccessResponse {
       mimeType: string;
       size: number;
       duration?: number;
+      transcriptionModelUsed?: string;
+      transcriptionModelAttempts?: string[];
     };
     transcriptionStatus: TranscriptionStatus;
     warnings: string[];
+    transcriptionModelUsed?: string;
+    transcriptionModelAttempts?: string[];
   };
   error: null;
 }
@@ -159,6 +164,10 @@ export interface TranscriptionFailureResponse {
   error: {
     code: TranscriptionErrorCode;
     message: string;
+  };
+  meta?: {
+    transcriptionModelUsed?: string;
+    transcriptionModelAttempts?: string[];
   };
 }
 

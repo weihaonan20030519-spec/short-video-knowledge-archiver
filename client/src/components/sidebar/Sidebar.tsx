@@ -46,7 +46,7 @@ export function Sidebar(props: SidebarProps) {
   };
 
   return (
-    <aside className="flex h-full min-h-0 flex-col gap-5 overflow-hidden rounded-[28px] border border-slate-800 bg-slate-950/95 px-4 py-5 text-white shadow-panel">
+    <aside className="flex h-full min-h-0 min-w-0 flex-col gap-5 overflow-hidden rounded-[28px] border border-slate-800 bg-slate-950/95 px-4 py-5 text-white shadow-panel">
       <div>
         <div className="flex items-start justify-between gap-3">
           <div>

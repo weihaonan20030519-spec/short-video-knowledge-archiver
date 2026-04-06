@@ -32,13 +32,29 @@ export function createTranscriptionController(options: CreateTranscriptionContro
       });
     } catch (error) {
       if (error instanceof ApiError) {
+        const transcriptionMeta =
+          error.details &&
+          (typeof error.details.transcriptionModelUsed === "string" ||
+            Array.isArray(error.details.transcriptionModelAttempts))
+            ? {
+                transcriptionModelUsed:
+                  typeof error.details.transcriptionModelUsed === "string"
+                    ? error.details.transcriptionModelUsed
+                    : undefined,
+                transcriptionModelAttempts: Array.isArray(error.details.transcriptionModelAttempts)
+                  ? error.details.transcriptionModelAttempts.filter((item): item is string => typeof item === "string")
+                  : undefined
+              }
+            : undefined;
+
         return res.status(error.status).json({
           success: false,
           data: null,
           error: {
             code: error.code,
             message: error.message
-          }
+          },
+          meta: transcriptionMeta
         });
       }
 

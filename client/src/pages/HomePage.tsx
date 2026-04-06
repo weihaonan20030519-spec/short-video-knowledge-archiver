@@ -119,6 +119,7 @@ export function HomePage() {
   const { activeFilter, searchQuery, selectedFolderId, selectedTagId, setSelectedFolderId } = useQueryStore();
   const [collectionModal, setCollectionModal] = useState<CollectionModalState>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
+  const [detailDismissed, setDetailDismissed] = useState(false);
 
   const filteredRecords = useRecordFilters(records, tags, folders);
   const selectedRecord = filteredRecords.find((record) => record.id === selectedRecordId) || null;
@@ -126,10 +127,14 @@ export function HomePage() {
   useEffect(() => {
     const hasSelectedRecord = filteredRecords.some((record) => record.id === selectedRecordId);
 
+    if (!selectedRecordId && detailDismissed) {
+      return;
+    }
+
     if ((!selectedRecordId || !hasSelectedRecord) && filteredRecords[0]) {
       setSelectedRecordId(filteredRecords[0].id);
     }
-  }, [filteredRecords, selectedRecordId, setSelectedRecordId]);
+  }, [detailDismissed, filteredRecords, selectedRecordId, setSelectedRecordId]);
 
   useEffect(() => {
     if (selectedRecord) {
@@ -244,6 +249,7 @@ export function HomePage() {
     };
 
     await recordRepository.create(record);
+    setDetailDismissed(false);
     setSelectedRecordId(record.id);
     setCreateModalOpen(false);
   };
@@ -413,6 +419,16 @@ export function HomePage() {
     await exportFolderToPdf(folder, folderRecords, normalizedTags, appLanguage);
   };
 
+  const handleSelectRecord = (recordId: string) => {
+    setDetailDismissed(false);
+    setSelectedRecordId(recordId);
+  };
+
+  const handleCloseDetail = () => {
+    setDetailDismissed(true);
+    setSelectedRecordId(null);
+  };
+
   const handleConfirmAction = async () => {
     if (!confirmState) {
       return;
@@ -430,6 +446,7 @@ export function HomePage() {
 
     await recordRepository.delete(confirmState.target.id);
     if (selectedRecordId === confirmState.target.id) {
+      setDetailDismissed(false);
       setSelectedRecordId(null);
     }
     setConfirmState(null);
@@ -452,6 +469,8 @@ export function HomePage() {
   return (
     <>
       <ThreePaneLayout
+        detailOpen={Boolean(selectedRecord)}
+        onCloseDetail={handleCloseDetail}
         sidebar={
           <Sidebar
             folders={normalizedFolders}
@@ -475,7 +494,7 @@ export function HomePage() {
             selectedRecordId={selectedRecordId}
             emptyTitle={emptyState.title}
             emptyDescription={emptyState.description}
-            onSelectRecord={setSelectedRecordId}
+            onSelectRecord={handleSelectRecord}
           />
         }
         detail={

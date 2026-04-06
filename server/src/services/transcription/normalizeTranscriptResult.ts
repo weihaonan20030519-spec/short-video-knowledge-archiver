@@ -36,8 +36,14 @@ export function normalizeTranscriptResult(input: {
     segments: normalizedOutput.segments,
     timestamps: normalizedOutput.timestamps,
     language: normalizedOutput.language ?? null,
-    fileMeta: input.fileMeta,
+    fileMeta: {
+      ...input.fileMeta,
+      transcriptionModelUsed: normalizedOutput.transcriptionModelUsed,
+      transcriptionModelAttempts: normalizedOutput.transcriptionModelAttempts
+    },
     transcriptionStatus: "transcript_needs_review",
-    warnings: warnings.map((warning) => warning.trim()).filter(Boolean)
+    warnings: warnings.map((warning) => warning.trim()).filter(Boolean),
+    transcriptionModelUsed: normalizedOutput.transcriptionModelUsed,
+    transcriptionModelAttempts: normalizedOutput.transcriptionModelAttempts
   };
 }

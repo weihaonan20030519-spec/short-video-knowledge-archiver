@@ -810,4 +810,26 @@ describe("HomePage interactions", () => {
     expect(screen.queryByRole("button", { name: "第一条记录" })).not.toBeInTheDocument();
     expect(screen.getByText("第二条记录")).toBeInTheDocument();
   });
+
+  it("closes the two-pane detail overlay without auto-selecting the first record again", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 900
+    });
+
+    const firstRecord = createRecord({ id: "record-1", title: "第一条记录" });
+    const secondRecord = createRecord({ id: "record-2", title: "第二条记录", createdAt: new Date("2026-04-02T11:00:00.000Z").toISOString() });
+
+    const { user } = await renderApp({
+      records: [firstRecord, secondRecord]
+    });
+
+    expect(await screen.findByTestId("workspace-detail-overlay")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "关闭" }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("workspace-detail-overlay")).not.toBeInTheDocument();
+    });
+  });
 });

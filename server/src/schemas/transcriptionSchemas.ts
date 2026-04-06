@@ -28,7 +28,9 @@ export const transcriptFileMetaSchema = z.object({
   fileName: z.string().min(1),
   mimeType: z.string().min(1),
   size: z.number().int().nonnegative(),
-  duration: z.number().nonnegative().optional()
+  duration: z.number().nonnegative().optional(),
+  transcriptionModelUsed: z.string().min(1).optional(),
+  transcriptionModelAttempts: z.array(z.string().min(1)).optional()
 });
 
 export const transcriptionResponseSchema = z.object({
@@ -40,7 +42,9 @@ export const transcriptionResponseSchema = z.object({
   language: z.string().min(1).nullable().optional(),
   fileMeta: transcriptFileMetaSchema,
   transcriptionStatus: transcriptionStatusSchema,
-  warnings: z.array(z.string()).default([])
+  warnings: z.array(z.string()).default([]),
+  transcriptionModelUsed: z.string().min(1).optional(),
+  transcriptionModelAttempts: z.array(z.string().min(1)).optional()
 });
 
 export const transcriptionProviderOutputSchema = z.object({
@@ -48,7 +52,9 @@ export const transcriptionProviderOutputSchema = z.object({
   segments: z.array(transcriptSegmentSchema).optional(),
   timestamps: z.array(transcriptTimestampSchema).optional(),
   language: z.string().min(1).nullable().optional(),
-  warnings: z.array(z.string()).default([])
+  warnings: z.array(z.string()).default([]),
+  transcriptionModelUsed: z.string().min(1).optional(),
+  transcriptionModelAttempts: z.array(z.string().min(1)).optional()
 });
 
 export type TranscriptionSourceType = z.infer<typeof transcriptionSourceTypeSchema>;

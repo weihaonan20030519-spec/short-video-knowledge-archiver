@@ -25,7 +25,7 @@ export function RecordListPane({
   const { t } = useAppI18n();
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] border border-slate-200/90 bg-slate-50/95 p-4 shadow-panel">
+    <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-[28px] border border-slate-200/90 bg-slate-50/95 p-4 shadow-panel">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{t.list.title}</p>

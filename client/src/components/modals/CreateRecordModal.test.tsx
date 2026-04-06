@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -42,7 +42,9 @@ describe("CreateRecordModal upload flow", () => {
         language: "zh-CN",
         segments: [],
         timestamps: [],
-        warnings: []
+        warnings: [],
+        transcriptionModelUsed: "gemini-2.5-flash",
+        transcriptionModelAttempts: ["gemini-2.5-flash"]
       },
       error: null
     });
@@ -74,6 +76,7 @@ describe("CreateRecordModal upload flow", () => {
     expect(screen.getByText("文件大小")).toBeInTheDocument();
     expect(await screen.findByText("转写完成")).toBeInTheDocument();
     expect(screen.getByText("转写完成，已自动填入原始内容区。")).toBeInTheDocument();
+    expect(screen.getByText("转写模型: Gemini 2.5 Flash")).toBeInTheDocument();
     expect(screen.getByDisplayValue("方法课音频")).toBeInTheDocument();
 
     const contentField = screen.getByRole("textbox", { name: "原始转写文本" }) as HTMLTextAreaElement;
@@ -190,12 +193,21 @@ describe("CreateRecordModal upload flow", () => {
         language: "en",
         segments: [],
         timestamps: [],
-        warnings: []
+        warnings: [],
+        transcriptionModelUsed: "gemini-2.5-flash-lite",
+        transcriptionModelAttempts: ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
       },
       error: null
     });
 
     expect(await screen.findByText("Transcription Complete")).toBeInTheDocument();
+    const uploadStatusCard = screen.getByTestId("upload-status-card");
+    expect(
+      within(uploadStatusCard).getByText((_, element) =>
+        element?.tagName === "P" &&
+        element.textContent === "Transcription Model Attempts: Gemini 2.5 Flash → Gemini 2.5 Flash Lite"
+      )
+    ).toBeInTheDocument();
     expect(screen.getByDisplayValue("Demo Video")).toBeInTheDocument();
   });
 
@@ -208,6 +220,10 @@ describe("CreateRecordModal upload flow", () => {
       error: {
         code: "TRANSCRIPTION_TIMEOUT",
         message: "Timed out waiting for Gemini file processing"
+      },
+      meta: {
+        transcriptionModelUsed: "gemini-2.5-flash-lite",
+        transcriptionModelAttempts: ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
       }
     });
 
@@ -228,6 +244,13 @@ describe("CreateRecordModal upload flow", () => {
     await user.upload(screen.getByLabelText("Select a video or audio file"), file);
 
     expect(await screen.findByText("Processing Timed Out")).toBeInTheDocument();
+    const uploadStatusCard = screen.getByTestId("upload-status-card");
+    expect(
+      within(uploadStatusCard).getByText((_, element) =>
+        element?.tagName === "P" &&
+        element.textContent === "Transcription Model Attempts: Gemini 2.5 Flash → Gemini 2.5 Flash Lite"
+      )
+    ).toBeInTheDocument();
     expect(screen.getAllByText("Processing timed out. Please retry.").length).toBeGreaterThan(0);
     expect(screen.getByText("You Can Continue Editing Manually")).toBeInTheDocument();
   });

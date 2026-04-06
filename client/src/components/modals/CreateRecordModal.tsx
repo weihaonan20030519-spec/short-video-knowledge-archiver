@@ -25,6 +25,7 @@ import {
   LARGE_FILE_HINT_THRESHOLD_BYTES,
   TRANSCRIPTION_MAX_FILE_SIZE_BYTES,
   TRANSCRIPTION_RECOMMENDED_MAX_MINUTES,
+  formatTranscriptionModelName,
   type ClientTranscriptionError,
   type ClientTranscriptionResult,
   type UploadUiStatus
@@ -545,6 +546,24 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
     selectedFileSize != null &&
     selectedFileSize >= LARGE_FILE_HINT_THRESHOLD_BYTES &&
     (uploadUiStatus === "uploading" || uploadUiStatus === "processing");
+  const transcriptionModelAttempts =
+    transcriptionResult?.transcriptionModelAttempts ||
+    transcriptionResult?.transcriptMeta.transcriptionModelAttempts ||
+    transcriptionError?.transcriptionModelAttempts ||
+    [];
+  const transcriptionModelUsed =
+    transcriptionResult?.transcriptionModelUsed ||
+    transcriptionResult?.transcriptMeta.transcriptionModelUsed ||
+    transcriptionError?.transcriptionModelUsed ||
+    null;
+  const formattedModelUsed = formatTranscriptionModelName(transcriptionModelUsed);
+  const formattedModelAttempts = transcriptionModelAttempts
+    .map((model) => formatTranscriptionModelName(model))
+    .filter((model): model is string => Boolean(model));
+  const hasModelFallback =
+    formattedModelAttempts.length > 1 &&
+    formattedModelUsed != null &&
+    formattedModelUsed === formattedModelAttempts.at(-1);
 
   const triggerBrowserImport = async () => {
     setValue("inputMethod", "link", { shouldDirty: true });
@@ -662,7 +681,11 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
             ? "too_large"
             : "failed"
       );
-      setTranscriptionError(response.error);
+      setTranscriptionError({
+        ...response.error,
+        transcriptionModelUsed: response.meta?.transcriptionModelUsed || null,
+        transcriptionModelAttempts: response.meta?.transcriptionModelAttempts
+      });
       return;
     }
 
@@ -680,8 +703,14 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
         segments: response.data.segments,
         timestamps: response.data.timestamps,
         provider: "gemini",
+        transcriptionModelUsed: response.data.transcriptionModelUsed || response.data.fileMeta.transcriptionModelUsed || null,
+        transcriptionModelAttempts:
+          response.data.transcriptionModelAttempts || response.data.fileMeta.transcriptionModelAttempts,
         warnings: response.data.warnings
       },
+      transcriptionModelUsed: response.data.transcriptionModelUsed || response.data.fileMeta.transcriptionModelUsed || null,
+      transcriptionModelAttempts:
+        response.data.transcriptionModelAttempts || response.data.fileMeta.transcriptionModelAttempts,
       warnings: response.data.warnings
     };
 
@@ -906,6 +935,23 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
                         </div>
                       </div>
 
+                      {formattedModelUsed || formattedModelAttempts.length ? (
+                        <div className="mt-4 rounded-2xl border border-white/40 bg-white/70 px-3 py-3 text-sm text-slate-700">
+                          {formattedModelAttempts.length > 1 ? (
+                            <p>
+                              <span className="font-medium text-slate-900">{t.modals.uploadModelAttempts}: </span>
+                              {formattedModelAttempts.join(" → ")}
+                            </p>
+                          ) : formattedModelUsed ? (
+                            <p>
+                              <span className="font-medium text-slate-900">{t.modals.uploadModelUsed}: </span>
+                              {formattedModelUsed}
+                              {hasModelFallback ? `（${t.modals.uploadModelFallback}）` : ""}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+
                       {transcriptionErrorMessage ? (
                         <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-700">
                           <p>{transcriptionErrorMessage}</p>
@@ -933,6 +979,11 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
                       <p>
                         {t.modals.timestamps}: {transcriptionResult.transcriptMeta.timestamps?.length ?? 0}
                       </p>
+                      {formattedModelUsed ? (
+                        <p>
+                          {t.modals.uploadModelUsed}: {formattedModelUsed}
+                        </p>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>

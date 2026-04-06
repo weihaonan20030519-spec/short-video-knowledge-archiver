@@ -22,6 +22,8 @@ export interface ClientTranscriptMeta {
   segments?: TranscriptSegment[];
   timestamps?: TranscriptTimestamp[];
   provider?: string | null;
+  transcriptionModelUsed?: string | null;
+  transcriptionModelAttempts?: string[];
   warnings?: string[];
 }
 
@@ -31,12 +33,16 @@ export interface ClientTranscriptionResult {
   transcriptText: string;
   transcriptionStatus: TranscriptionStatus;
   transcriptMeta: ClientTranscriptMeta;
+  transcriptionModelUsed?: string | null;
+  transcriptionModelAttempts?: string[];
   warnings: string[];
 }
 
 export interface ClientTranscriptionError {
   code: TranscriptionErrorCode;
   message: string;
+  transcriptionModelUsed?: string | null;
+  transcriptionModelAttempts?: string[];
 }
 
 export type UploadUiStatus =
@@ -74,4 +80,25 @@ export function inferSourceTypeFromFileName(fileName: string): TranscriptionSour
 
 export function isSupportedTranscriptionFile(file: File) {
   return inferSourceTypeFromFileName(file.name) !== null;
+}
+
+export function formatTranscriptionModelName(modelName?: string | null) {
+  if (!modelName) {
+    return null;
+  }
+
+  return modelName
+    .split("-")
+    .map((part, index) => {
+      if (index === 0 && part.toLowerCase() === "gemini") {
+        return "Gemini";
+      }
+
+      if (/^\d+(?:\.\d+)?$/.test(part)) {
+        return part;
+      }
+
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(" ");
 }

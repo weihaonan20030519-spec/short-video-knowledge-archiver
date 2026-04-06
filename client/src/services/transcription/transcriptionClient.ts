@@ -17,8 +17,18 @@ function parseResponseText(text: string, status: number): TranscriptionResponse 
     success: false,
     data: null,
     error: {
-      code: status === 504 ? "TRANSCRIPTION_TIMEOUT" : "INTERNAL_ERROR",
-      message: status === 504 ? "Processing timed out" : "Internal server error"
+      code:
+        status === 504
+          ? "TRANSCRIPTION_TIMEOUT"
+          : status === 429
+            ? "TRANSCRIPTION_QUOTA_EXCEEDED"
+            : "INTERNAL_ERROR",
+      message:
+        status === 504
+          ? "Processing timed out"
+          : status === 429
+            ? "Transcription quota exceeded"
+            : "Internal server error"
     }
   };
 }

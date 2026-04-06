@@ -115,7 +115,7 @@ export function DetailPane({ record, folders, tags, onAnalyze, onDeleteRecord }:
 
   if (!draft) {
     return (
-      <section className="flex h-full items-center justify-center rounded-[28px] border border-slate-200 bg-slate-50/95 p-6 shadow-panel">
+      <section className="flex h-full min-w-0 items-center justify-center rounded-[28px] border border-slate-200 bg-slate-50/95 p-6 shadow-panel">
         <EmptyState title={t.empty.noSelectionTitle} description={t.empty.noSelectionDescription} />
       </section>
     );
@@ -363,7 +363,7 @@ export function DetailPane({ record, folders, tags, onAnalyze, onDeleteRecord }:
 
   return (
     <section
-      className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto rounded-[28px] border border-slate-200/90 bg-slate-50/95 p-4 shadow-panel scrollbar-thin"
+      className="flex h-full min-h-0 min-w-0 flex-col gap-4 overflow-y-auto rounded-[28px] border border-slate-200/90 bg-slate-50/95 p-4 shadow-panel scrollbar-thin"
       data-testid="detail-pane-scroll"
     >
       <SectionCard

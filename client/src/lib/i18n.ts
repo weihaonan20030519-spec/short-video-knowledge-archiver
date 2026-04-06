@@ -187,6 +187,9 @@ type Dictionary = {
     uploadCurrentStatus: string;
     uploadCurrentStep: string;
     uploadSteps: string;
+    uploadModelUsed: string;
+    uploadModelAttempts: string;
+    uploadModelFallback: string;
     uploadFileSelected: string;
     uploadProcessingDescription: string;
     uploadSuccessDescription: string;
@@ -299,6 +302,7 @@ type Dictionary = {
     unsupportedFileFormat: string;
     fileTooLarge: (sizeLimitMb: number) => string;
     transcriptionTimeout: string;
+    transcriptionQuotaExceeded: string;
     transcriptionFailed: string;
     youCanContinueEditingManually: string;
     noTranscriptAvailable: string;
@@ -451,6 +455,9 @@ export const messages: Record<AppLanguage, Dictionary> = {
       uploadCurrentStatus: "当前状态",
       uploadCurrentStep: "当前步骤",
       uploadSteps: "处理步骤",
+      uploadModelUsed: "转写模型",
+      uploadModelAttempts: "转写尝试模型",
+      uploadModelFallback: "自动回退",
       uploadFileSelected: "已选择文件",
       uploadProcessingDescription: "系统已开始处理，请稍候，原始内容区会在转写完成后自动填入。",
       uploadSuccessDescription: "转写完成，已自动填入原始内容区。",
@@ -578,6 +585,7 @@ export const messages: Record<AppLanguage, Dictionary> = {
       unsupportedFileFormat: "文件格式不受支持，请上传音频或视频文件。",
       fileTooLarge: (sizeLimitMb) => `文件过大，请上传 ${sizeLimitMb}MB 以内的单个文件。`,
       transcriptionTimeout: "处理超时，请重试。",
+      transcriptionQuotaExceeded: "当前 AI 转写额度已用尽，请稍后重试或更换可用配置。",
       transcriptionFailed: "转写失败，请重试。",
       youCanContinueEditingManually: "你仍可继续手动编辑原始内容。",
       noTranscriptAvailable: "暂无可用转写文本。",
@@ -758,6 +766,9 @@ export const messages: Record<AppLanguage, Dictionary> = {
       uploadCurrentStatus: "Current Status",
       uploadCurrentStep: "Current Step",
       uploadSteps: "Workflow",
+      uploadModelUsed: "Transcription Model",
+      uploadModelAttempts: "Transcription Model Attempts",
+      uploadModelFallback: "Auto fallback",
       uploadFileSelected: "File Selected",
       uploadProcessingDescription: "Processing has started. Keep this window open while the transcript is prepared.",
       uploadSuccessDescription: "Transcription is complete and has been added to the Original Content field.",
@@ -887,6 +898,7 @@ export const messages: Record<AppLanguage, Dictionary> = {
       unsupportedFileFormat: "Unsupported File Format",
       fileTooLarge: (sizeLimitMb) => `File Too Large. Upload a single file within ${sizeLimitMb}MB.`,
       transcriptionTimeout: "Processing timed out. Please retry.",
+      transcriptionQuotaExceeded: "The current AI transcription quota has been exhausted. Please retry later or switch to an available configuration.",
       transcriptionFailed: "Transcription Failed",
       youCanContinueEditingManually: "You Can Continue Editing Manually",
       noTranscriptAvailable: "No Transcript Available",
@@ -1023,6 +1035,10 @@ export function getTranscriptionErrorMessage(
 
   if (code === "TRANSCRIPTION_TIMEOUT") {
     return target.transcriptionTimeout;
+  }
+
+  if (code === "TRANSCRIPTION_QUOTA_EXCEEDED") {
+    return target.transcriptionQuotaExceeded;
   }
 
   if (code === "TRANSCRIPTION_FAILED" || code === "AUDIO_EXTRACTION_FAILED") {

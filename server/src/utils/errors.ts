@@ -8,17 +8,20 @@ export type AnalyzeErrorCode =
   | "FILE_TOO_LARGE"
   | "AUDIO_EXTRACTION_FAILED"
   | "TRANSCRIPTION_TIMEOUT"
+  | "TRANSCRIPTION_QUOTA_EXCEEDED"
   | "TRANSCRIPTION_FAILED"
   | "INTERNAL_ERROR";
 
 export class ApiError extends Error {
   code: AnalyzeErrorCode;
   status: number;
+  details?: Record<string, unknown>;
 
-  constructor(code: AnalyzeErrorCode, message: string, status = 400) {
+  constructor(code: AnalyzeErrorCode, message: string, status = 400, details?: Record<string, unknown>) {
     super(message);
     this.code = code;
     this.status = status;
+    this.details = details;
   }
 }
 

@@ -44,6 +44,8 @@ export interface TranscriptMeta {
   segments?: TranscriptSegment[];
   timestamps?: TranscriptTimestamp[];
   provider?: string | null;
+  transcriptionModelUsed?: string | null;
+  transcriptionModelAttempts?: string[];
   warnings?: string[];
 }
 
