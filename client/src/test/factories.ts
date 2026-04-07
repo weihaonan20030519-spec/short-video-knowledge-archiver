@@ -1,4 +1,5 @@
 import type { Folder, RecordItem, Tag } from "../types/domain";
+import { buildDefaultMediaAsset } from "../services/mediaAsset/mediaAssetMapper";
 
 export function createFolder(overrides: Partial<Folder> = {}): Folder {
   return {
@@ -39,6 +40,7 @@ export function createRecord(overrides: Partial<RecordItem> = {}): RecordItem {
     transcriptionStatus: overrides.transcriptionStatus || "idle",
     contentCompleteness: overrides.contentCompleteness || "full",
     transcriptMeta: overrides.transcriptMeta ?? null,
+    mediaAsset: overrides.mediaAsset ?? buildDefaultMediaAsset(),
     aiStatus: overrides.aiStatus || "not_started",
     aiErrorMessage: overrides.aiErrorMessage ?? null,
     aiErrorCode: overrides.aiErrorCode ?? null,

@@ -39,12 +39,19 @@ describe("transcribeUploadedFile", () => {
       {},
       {
         transcriptionProvider,
-        audioExtractionService: createAudioExtractionServiceMock()
+        audioExtractionService: createAudioExtractionServiceMock(),
+        probeMediaMetadata: vi.fn(async () => ({
+          sourceType: "audio" as const,
+          duration: 9.5,
+          format: "mp3"
+        }))
       }
     );
 
+    expect(result.phase).toBe("transcript_ready");
     expect(result.sourceType).toBe("audio");
     expect(result.transcriptText).toContain("transcribed body");
+    expect(result.fileMeta.duration).toBe(9.5);
     expect(transcriptionProvider.transcribe).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceType: "audio",
@@ -67,7 +74,12 @@ describe("transcribeUploadedFile", () => {
       {},
       {
         transcriptionProvider,
-        audioExtractionService
+        audioExtractionService,
+        probeMediaMetadata: vi.fn(async () => ({
+          sourceType: "video" as const,
+          duration: 17,
+          format: "mp4"
+        }))
       }
     );
 
@@ -93,7 +105,8 @@ describe("transcribeUploadedFile", () => {
         {},
         {
           transcriptionProvider: createTranscriptionProviderMock(),
-          audioExtractionService: createAudioExtractionServiceMock()
+          audioExtractionService: createAudioExtractionServiceMock(),
+          probeMediaMetadata: vi.fn()
         }
       )
     ).rejects.toMatchObject({
@@ -121,12 +134,56 @@ describe("transcribeUploadedFile", () => {
         {},
         {
           transcriptionProvider,
-          audioExtractionService: createAudioExtractionServiceMock()
+          audioExtractionService: createAudioExtractionServiceMock(),
+          probeMediaMetadata: vi.fn(async () => ({
+            sourceType: "audio" as const,
+            duration: 11,
+            format: "mp3"
+          }))
         }
       )
     ).rejects.toMatchObject({
       code: "TRANSCRIPTION_FAILED",
-      status: 502
+      status: 502,
+      details: expect.objectContaining({
+        failureStage: "transcription",
+        phase: "failed"
+      })
+    });
+  });
+
+  it("marks audio extraction failures as preprocessing failures", async () => {
+    const audioExtractionService: AudioExtractionService = {
+      extractAudio: vi.fn(async () => {
+        throw new ApiError("AUDIO_EXTRACTION_FAILED", "ffmpeg failed", 422);
+      })
+    };
+
+    await expect(
+      transcribeUploadedFile(
+        {
+          path: "/tmp/mock-input.mp4",
+          originalname: "demo.mp4",
+          mimetype: "video/mp4",
+          size: 2048
+        },
+        {},
+        {
+          transcriptionProvider: createTranscriptionProviderMock(),
+          audioExtractionService,
+          probeMediaMetadata: vi.fn(async () => ({
+            sourceType: "video" as const,
+            duration: 17,
+            format: "mp4"
+          }))
+        }
+      )
+    ).rejects.toMatchObject({
+      code: "AUDIO_EXTRACTION_FAILED",
+      details: expect.objectContaining({
+        failureStage: "preprocessing",
+        phase: "failed"
+      })
     });
   });
 });

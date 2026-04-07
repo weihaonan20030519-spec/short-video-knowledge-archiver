@@ -13,6 +13,13 @@ export type AnalyzeMode = "concise" | "learning";
 export type AppLanguage = "zh-CN" | "en";
 export type HighlightTone = "core" | "method" | "action" | "warning";
 export type SourceType = "video" | "audio" | "text" | "link" | "manual";
+export type MediaAssetStorageMode = "none" | "local_archive_dir";
+export type MediaAssetAvailability =
+  | "ready"
+  | "missing"
+  | "permission_required"
+  | "write_failed"
+  | "not_archived";
 export type TranscriptionStatus =
   | "idle"
   | "file_uploaded"
@@ -47,6 +54,20 @@ export interface TranscriptMeta {
   transcriptionModelUsed?: string | null;
   transcriptionModelAttempts?: string[];
   warnings?: string[];
+}
+
+export interface MediaAsset {
+  storageMode: MediaAssetStorageMode;
+  rootId: string | null;
+  relativePath: string | null;
+  fileName: string | null;
+  mimeType: string | null;
+  size: number | null;
+  duration: number | null;
+  sourceType: Extract<SourceType, "audio" | "video"> | null;
+  availability: MediaAssetAvailability;
+  lastVerifiedAt: string | null;
+  lastKnownError: string | null;
 }
 
 export interface TextHighlight {
@@ -107,6 +128,7 @@ export interface RecordItem {
   transcriptionStatus: TranscriptionStatus;
   contentCompleteness: ContentCompleteness;
   transcriptMeta?: TranscriptMeta | null;
+  mediaAsset?: MediaAsset | null;
   aiStatus: AIStatus;
   aiErrorMessage: string | null;
   aiErrorCode?: "RAW_TEXT_REQUIRED" | "TEXT_TOO_SHORT" | "AI_RESPONSE_INVALID" | "AI_REQUEST_FAILED" | "INTERNAL_ERROR" | null;

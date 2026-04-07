@@ -7,6 +7,10 @@ import { useAutoSave } from "../../hooks/useAutoSave";
 import { buildKnowledgeSections } from "../../lib/aiPresentation";
 import { exportRecordToPdf } from "../../lib/exportPdf";
 import {
+  getMediaAssetDisplayState,
+  getSafeMediaAsset
+} from "../../services/mediaAsset/mediaAssetMapper";
+import {
   getAnalyzeErrorMessage,
   getFolderDisplayName,
   getSourceTypeLabel
@@ -122,6 +126,8 @@ export function DetailPane({ record, folders, tags, onAnalyze, onDeleteRecord }:
   }
 
   const activeMode = getActiveMode(draft);
+  const mediaAsset = getSafeMediaAsset(draft);
+  const mediaAssetDisplay = getMediaAssetDisplayState(appLanguage, mediaAsset);
   const activeSlot = draft.aiOutputs[activeMode];
   const pendingMode = pendingAnalyzeMode || (draft.aiStatus === "processing" ? activeMode : null);
   const isAnalyzePending = Boolean(pendingMode);
@@ -443,6 +449,31 @@ export function DetailPane({ record, folders, tags, onAnalyze, onDeleteRecord }:
         ) : (
           <p className="text-sm text-slate-500">{t.detail.noTranscriptAvailable}</p>
         )}
+      </SectionCard>
+
+      <SectionCard title={t.detail.mediaAsset.title}>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            {t.detail.mediaAsset.storageMode}: {mediaAssetDisplay.storageLabel}
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            {t.detail.mediaAsset.availability}:{" "}
+            <span className="font-medium text-slate-700">{mediaAssetDisplay.availabilityLabel}</span>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            {t.detail.fileName}: {mediaAsset.fileName || t.common.emptyValue}
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            {t.detail.fileType}: {mediaAsset.mimeType || t.common.emptyValue}
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            {t.detail.mediaAsset.fileSize}: {mediaAsset.size ?? t.common.emptyValue}
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            {t.detail.duration}: {mediaAsset.duration ?? t.common.emptyValue}
+          </div>
+        </div>
+        <p className="mt-3 text-sm text-slate-500">{mediaAssetDisplay.availabilityDescription}</p>
       </SectionCard>
 
       <SectionCard title={t.detail.classification}>

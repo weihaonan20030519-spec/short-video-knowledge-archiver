@@ -2,6 +2,7 @@ import path from "node:path";
 
 import type {
   TranscriptFileMeta,
+  TranscriptionPhase,
   TranscriptionProviderOutput,
   TranscriptionResponse,
   TranscriptionSourceType
@@ -30,6 +31,7 @@ export function normalizeTranscriptResult(input: {
   }
 
   return {
+    phase: "transcript_ready" satisfies TranscriptionPhase,
     sourceType: input.sourceType,
     suggestedTitle: buildSuggestedTitle(input.fileMeta.fileName),
     transcriptText: normalizedOutput.transcriptText,

@@ -15,6 +15,9 @@ const envSchema = z.object({
   TRANSCRIPTION_RECOMMENDED_MAX_MINUTES: z.coerce.number().int().positive().default(15),
   TRANSCRIPTION_FILE_READY_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1000),
   TRANSCRIPTION_FILE_READY_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
+  ARTICLE_IMPORT_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
+  ARTICLE_IMPORT_MAX_REDIRECTS: z.coerce.number().int().min(0).default(3),
+  ARTICLE_IMPORT_MAX_RESPONSE_BYTES: z.coerce.number().int().positive().default(750_000),
   PORT: z.coerce.number().int().positive().default(3001),
   MIN_RAW_TEXT_LENGTH: z.coerce.number().int().positive().default(30)
 });

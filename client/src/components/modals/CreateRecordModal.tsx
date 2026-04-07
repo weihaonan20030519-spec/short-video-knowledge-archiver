@@ -4,12 +4,6 @@ import { useForm } from "react-hook-form";
 
 import { useAppI18n } from "../../hooks/useAppI18n";
 import {
-  getSourceTypeLabel,
-  getFolderDisplayName,
-  getImportUiMessages,
-  getTranscriptionErrorMessage
-} from "../../lib/i18n";
-import {
   createBrowserImportSession,
   createImportSession,
   resolveBrowserImportSession,
@@ -19,258 +13,90 @@ import {
 import type { ImportResult, ImportSession } from "../../services/import/importTypes";
 import { transcribeFile } from "../../services/transcription/transcriptionClient";
 import {
+  getTerminalUploadUiStatus
+} from "../../services/transcription/transcriptionPhases";
+import {
+  buildClientTranscriptionError,
+  buildClientTranscriptionResult
+} from "../../services/transcription/transcriptionResponseMapper";
+import {
   inferSourceTypeFromFileName,
   isSupportedTranscriptionFile,
-  SUPPORTED_TRANSCRIPTION_ACCEPT,
-  LARGE_FILE_HINT_THRESHOLD_BYTES,
   TRANSCRIPTION_MAX_FILE_SIZE_BYTES,
-  TRANSCRIPTION_RECOMMENDED_MAX_MINUTES,
-  formatTranscriptionModelName,
   type ClientTranscriptionError,
   type ClientTranscriptionResult,
   type UploadUiStatus
 } from "../../services/transcription/transcriptionTypes";
 import { createRecordSchema, type CreateRecordValues } from "../../types/forms";
 import type { Folder, Tag } from "../../types/domain";
+import { buildCreateRecordDraft, type CreateRecordDraft } from "../../features/create-record/buildCreateRecordDraft";
+import {
+  derivePasteLinkImportUiState,
+  getPasteLinkHelperMessage,
+  getPasteLinkAwaitingTrackMessage,
+  getPasteLinkResultPrimaryMessage,
+  getPasteLinkPrimaryMessage,
+  getPasteLinkStatusTone,
+  deriveBrowserImportTerminalStatus,
+  hasMeaningfulImportResult,
+  type BrowserImportUiState
+} from "../../features/create-record/createRecordImportUi";
+import {
+  getCreateRecordModeConfig,
+  getCreateRecordSubmitLabel
+} from "../../features/create-record/createRecordModeConfig";
+import { getCreateRecordModeTransitionPlan } from "../../features/create-record/createRecordModeState";
+import {
+  isTextEntryMode,
+  mapUiModeToInputMethod,
+  type CreateRecordUiMode
+} from "../../features/create-record/createRecordUiMode";
+import { CreateRecordBrowserImportSection } from "./create-record/CreateRecordBrowserImportSection";
+import { CreateRecordFormContent } from "./create-record/CreateRecordFormContent";
+import { CreateRecordLinkSection } from "./create-record/CreateRecordLinkSection";
+import { CreateRecordModeHint } from "./create-record/CreateRecordModeHint";
+import { CreateRecordModeSwitcher } from "./create-record/CreateRecordModeSwitcher";
+import { CreateRecordPrimaryFields } from "./create-record/CreateRecordPrimaryFields";
+import { CreateRecordSecondaryFields } from "./create-record/CreateRecordSecondaryFields";
+import { CreateRecordUploadSection } from "./create-record/CreateRecordUploadSection";
 
 interface CreateRecordModalProps {
   open: boolean;
   folders: Folder[];
   tags: Tag[];
   onClose: () => void;
-  onSubmit: (
-    values: CreateRecordValues,
-    importResult: ImportResult | null,
-    transcriptionResult: ClientTranscriptionResult | null
-  ) => Promise<void>;
+  onSubmit: (draft: CreateRecordDraft) => Promise<void>;
 }
 
-type BrowserImportState =
-  | {
-      status: "idle";
-      sessionToken: null;
-      expiresAt: null;
-      startedAt: null;
-    }
-  | {
-      status: "waiting" | "ready" | "incomplete" | "failed";
-      sessionToken: string | null;
-      expiresAt: string | null;
-      startedAt: number | null;
-    };
+interface BrowserImportRuntimeState extends BrowserImportUiState {
+  sessionToken: string | null;
+  expiresAt: string | null;
+  startedAt: number | null;
+}
+
+interface AutofillFieldSnapshot {
+  lastValue: string;
+}
+
+interface AutofillSnapshotState {
+  title: AutofillFieldSnapshot;
+  content: AutofillFieldSnapshot;
+  originalUrl: AutofillFieldSnapshot;
+}
 
 const BROWSER_IMPORT_FINALIZE_TIMEOUT_MS = 12_000;
 
-function hasDetectedContent(result: ImportResult | null) {
-  return Boolean(result?.detectedContent?.trim()) && result?.contentCompleteness !== "empty";
-}
-
-function getStatusTone(flowState: ImportSession["flowState"], result: ImportResult | null) {
-  if (flowState === "ready_complete") {
-    return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  }
-
-  if (flowState === "ready_partial" || (flowState === "awaiting_track_selection" && hasDetectedContent(result))) {
-    return "border-sky-200 bg-sky-50 text-sky-700";
-  }
-
-  if (flowState === "ready_manual_completion") {
-    return "border-amber-200 bg-amber-50 text-amber-700";
-  }
-
-  if (flowState === "error_but_can_continue") {
-    return "border-rose-200 bg-rose-50 text-rose-700";
-  }
-
-  return "border-slate-200 bg-slate-50 text-slate-700";
-}
-
-function getPrimaryImportMessage(session: ImportSession, importText: ReturnType<typeof getImportUiMessages>) {
-  if (session.flowState === "detecting_platform") {
-    return importText.detectingPlatform;
-  }
-
-  if (session.flowState === "fetching_remote_content") {
-    return importText.fetchingRemoteContent;
-  }
-
-  if (session.flowState === "awaiting_track_selection") {
-    return hasDetectedContent(session.result) ? importText.multipleTracksAvailable : importText.selectTrackRecommended;
-  }
-
-  if (session.flowState === "ready_complete") {
-    return importText.complete;
-  }
-
-  if (session.flowState === "ready_partial") {
-    return importText.partial;
-  }
-
-  if (session.flowState === "ready_manual_completion") {
-    return importText.needsUserInput;
-  }
-
-  if (session.flowState === "error_but_can_continue") {
-    return importText.failedButCreatable;
-  }
-
-  return null;
-}
-
-function isResultEmpty(result: ImportResult | null) {
-  return !result || (!result.detectedTitle && !result.detectedContent && result.warnings.length === 0);
-}
-
-function hasMeaningfulImportResult(result: ImportResult | null) {
-  return Boolean(
-    result &&
-      (result.detectedTitle ||
-        result.detectedContent ||
-        result.originalUrl ||
-        result.availableTracks.length > 0 ||
-        result.warnings.length > 0)
-  );
-}
-
-function deriveBrowserImportTerminalStatus(result: ImportResult | null): Exclude<BrowserImportState["status"], "idle" | "waiting"> {
-  if (!result || result.outcome === "failed_but_creatable") {
-    return "failed";
-  }
-
-  if (result.outcome === "complete") {
-    return "ready";
-  }
-
-  return "incomplete";
-}
-
-function uploadStatusTone(status: UploadUiStatus) {
-  switch (status) {
-    case "uploading":
-      return "border-sky-200 bg-sky-50 text-sky-700";
-    case "processing":
-      return "border-amber-200 bg-amber-50 text-amber-700";
-    case "success":
-      return "border-emerald-200 bg-emerald-50 text-emerald-700";
-    case "timeout":
-      return "border-orange-200 bg-orange-50 text-orange-700";
-    case "too_large":
-    case "failed":
-      return "border-rose-200 bg-rose-50 text-rose-700";
-    default:
-      return "border-slate-200 bg-slate-50 text-slate-700";
-  }
-}
-
-function formatFileSize(size: number) {
-  if (size < 1024) {
-    return `${size} B`;
-  }
-
-  if (size < 1024 * 1024) {
-    return `${(size / 1024).toFixed(1)} KB`;
-  }
-
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-interface UploadWorkflowStep {
-  key: string;
-  label: string;
-  state: "pending" | "current" | "done" | "failed";
-}
-
-function buildUploadWorkflowSteps(
-  sourceType: "audio" | "video" | null,
-  uploadUiStatus: UploadUiStatus,
-  hasUploadCompleted: boolean,
-  stepLabels: {
-    upload: string;
-    transcribe: string;
-    process: string;
-  }
-): UploadWorkflowStep[] {
-  const steps: UploadWorkflowStep[] =
-    sourceType === "video"
-      ? [
-          { key: "upload", label: stepLabels.upload, state: "pending" },
-          { key: "process", label: stepLabels.process, state: "pending" }
-        ]
-      : [
-          { key: "upload", label: stepLabels.upload, state: "pending" },
-          { key: "transcribe", label: stepLabels.transcribe, state: "pending" }
-        ];
-
-  if (uploadUiStatus === "idle") {
-    return steps;
-  }
-
-  if (uploadUiStatus === "uploading") {
-    return steps.map((step, index) => ({
-      ...step,
-      state: index === 0 ? "current" : "pending"
-    }));
-  }
-
-  if (uploadUiStatus === "processing") {
-    return steps.map((step, index) => ({
-      ...step,
-      state: index === 0 ? "done" : "current"
-    }));
-  }
-
-  if (uploadUiStatus === "success") {
-    return steps.map((step) => ({
-      ...step,
-      state: "done"
-    }));
-  }
-
-  if (uploadUiStatus === "timeout" || uploadUiStatus === "failed") {
-    return steps.map((step, index) => ({
-      ...step,
-      state: hasUploadCompleted ? (index === 0 ? "done" : "failed") : index === 0 ? "failed" : "pending"
-    }));
-  }
-
-  if (uploadUiStatus === "too_large") {
-    return steps.map((step, index) => ({
-      ...step,
-      state: index === 0 ? "failed" : "pending"
-    }));
-  }
-
-  return steps;
-}
-
-function uploadWorkflowTone(state: UploadWorkflowStep["state"]) {
-  switch (state) {
-    case "current":
-      return {
-        dot: "bg-amber-500 ring-4 ring-amber-100",
-        text: "text-slate-900"
-      };
-    case "done":
-      return {
-        dot: "bg-emerald-500",
-        text: "text-slate-900"
-      };
-    case "failed":
-      return {
-        dot: "bg-rose-500",
-        text: "text-rose-700"
-      };
-    default:
-      return {
-        dot: "bg-slate-300",
-        text: "text-slate-500"
-      };
-  }
+function buildIdleBrowserImportState(): BrowserImportRuntimeState {
+  return {
+    status: "idle",
+    sessionToken: null,
+    expiresAt: null,
+    startedAt: null
+  };
 }
 
 export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: CreateRecordModalProps) {
   const { appLanguage, t } = useAppI18n();
-  const importText = getImportUiMessages(appLanguage);
   const {
     register,
     watch,
@@ -290,20 +116,14 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
     }
   });
 
-  const inputMethod = watch("inputMethod");
+  const [uiMode, setUiMode] = useState<CreateRecordUiMode>("upload");
   const originalUrl = watch("originalUrl");
   const content = watch("content");
 
   const [importSession, setImportSession] = useState<ImportSession>(() => createImportSession(null));
   const [preferredTrackId, setPreferredTrackId] = useState<string | null>(null);
-  const [activeProvider, setActiveProvider] = useState<"link" | "browser_context" | null>(null);
-  const [browserImportState, setBrowserImportState] = useState<BrowserImportState>({
-    status: "idle",
-    sessionToken: null,
-    expiresAt: null,
-    startedAt: null
-  });
-  const [, setTranscriptionStatus] = useState("idle");
+  const [browserImportState, setBrowserImportState] = useState<BrowserImportRuntimeState>(buildIdleBrowserImportState);
+  const [hasAttemptedLinkImport, setHasAttemptedLinkImport] = useState(false);
   const [uploadUiStatus, setUploadUiStatus] = useState<UploadUiStatus>("idle");
   const [transcriptionResult, setTranscriptionResult] = useState<ClientTranscriptionResult | null>(null);
   const [transcriptionError, setTranscriptionError] = useState<ClientTranscriptionError | null>(null);
@@ -312,16 +132,72 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
   const [selectedFileSourceType, setSelectedFileSourceType] = useState<"audio" | "video" | null>(null);
   const [hasUploadCompleted, setHasUploadCompleted] = useState(false);
   const activeTranscriptionRequestRef = useRef(0);
+  const activeLinkImportRequestRef = useRef(0);
   const lastSeenUrlRef = useRef<string | null>(null);
-  const lastImportedValueRef = useRef<{ title: string; content: string; url: string } | null>(null);
+  const lastAutofillSnapshotRef = useRef<AutofillSnapshotState>({
+    title: { lastValue: "" },
+    content: { lastValue: "" },
+    originalUrl: { lastValue: "" }
+  });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const resetAutofillSnapshot = () => {
+    lastAutofillSnapshotRef.current = {
+      title: { lastValue: "" },
+      content: { lastValue: "" },
+      originalUrl: { lastValue: "" }
+    };
+  };
+
+  const canOverwriteAutofillField = (currentValue: string, nextValue: string, previousValue: string) => {
+    if (!nextValue) {
+      return false;
+    }
+
+    return !currentValue || currentValue === previousValue;
+  };
+
+  const updateAutofillSnapshot = (nextValues: { title: string; content: string; originalUrl: string }) => {
+    lastAutofillSnapshotRef.current = {
+      title: { lastValue: nextValues.title },
+      content: { lastValue: nextValues.content },
+      originalUrl: { lastValue: nextValues.originalUrl }
+    };
+  };
 
   const invalidateTranscriptionRequest = () => {
     activeTranscriptionRequestRef.current += 1;
   };
 
-  const resetModalState = () => {
+  const invalidateLinkImportRequest = () => {
+    activeLinkImportRequestRef.current += 1;
+  };
+
+  const resetUploadRuntimeState = () => {
     invalidateTranscriptionRequest();
+    setUploadUiStatus("idle");
+    setHasUploadCompleted(false);
+    setTranscriptionResult(null);
+    setTranscriptionError(null);
+    setSelectedFileName(null);
+    setSelectedFileSize(null);
+    setSelectedFileSourceType(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const resetImportRuntimeState = () => {
+    invalidateLinkImportRequest();
+    setImportSession(createImportSession(null));
+    setPreferredTrackId(null);
+    setBrowserImportState(buildIdleBrowserImportState());
+    setHasAttemptedLinkImport(false);
+    lastSeenUrlRef.current = null;
+    resetAutofillSnapshot();
+  };
+
+  const resetModalState = () => {
     reset({
       inputMethod: "upload",
       title: "",
@@ -330,32 +206,13 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
       folderId: null,
       tagsText: ""
     });
-    setImportSession(createImportSession(null));
-    setPreferredTrackId(null);
-    setActiveProvider(null);
-    setBrowserImportState({
-      status: "idle",
-      sessionToken: null,
-      expiresAt: null,
-      startedAt: null
-    });
-    setTranscriptionStatus("idle");
-    setUploadUiStatus("idle");
-    setTranscriptionResult(null);
-    setTranscriptionError(null);
-    setSelectedFileName(null);
-    setSelectedFileSize(null);
-    setSelectedFileSourceType(null);
-    setHasUploadCompleted(false);
-    lastSeenUrlRef.current = null;
-    lastImportedValueRef.current = null;
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+    setUiMode("upload");
+    resetUploadRuntimeState();
+    resetImportRuntimeState();
   };
 
   const handleClose = () => {
-    invalidateTranscriptionRequest();
+    resetUploadRuntimeState();
     onClose();
   };
 
@@ -366,279 +223,56 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
     const currentTitle = getValues("title")?.trim() || "";
     const currentContent = getValues("content")?.trim() || "";
     const currentUrl = getValues("originalUrl")?.trim() || "";
-    const previousImported = lastImportedValueRef.current;
+    const previousAutofill = lastAutofillSnapshotRef.current;
 
-    if (importedUrl && (!currentUrl || currentUrl === previousImported?.url)) {
+    if (canOverwriteAutofillField(currentUrl, importedUrl, previousAutofill.originalUrl.lastValue)) {
       setValue("originalUrl", importedUrl, { shouldDirty: true });
     }
 
-    if (importedTitle && (!currentTitle || currentTitle === previousImported?.title)) {
+    if (canOverwriteAutofillField(currentTitle, importedTitle, previousAutofill.title.lastValue)) {
       setValue("title", importedTitle, { shouldDirty: true });
     }
 
-    if (importedContent && (!currentContent || currentContent === previousImported?.content)) {
+    if (canOverwriteAutofillField(currentContent, importedContent, previousAutofill.content.lastValue)) {
       setValue("content", importedContent, { shouldDirty: true });
-    } else if (!importedContent && currentContent && currentContent === previousImported?.content) {
+    } else if (!importedContent && currentContent && currentContent === previousAutofill.content.lastValue) {
       setValue("content", "", { shouldDirty: true });
     }
 
-    lastImportedValueRef.current = {
-      title: importedTitle || currentTitle,
+    updateAutofillSnapshot({
+      title: importedTitle,
       content: importedContent,
-      url: importedUrl || currentUrl
-    };
+      originalUrl: importedUrl
+    });
   };
 
-  useEffect(() => {
-    if (!open) {
-      resetModalState();
+  const resetPasteLinkRuntimeState = () => {
+    setImportSession(createImportSession(null));
+    setPreferredTrackId(null);
+    setHasAttemptedLinkImport(false);
+    lastSeenUrlRef.current = null;
+  };
+
+  const handleModeChange = (nextMode: CreateRecordUiMode) => {
+    if (nextMode === uiMode) {
       return;
     }
 
-    const trimmedUrl = originalUrl?.trim() || "";
-    if (trimmedUrl !== lastSeenUrlRef.current) {
-      const previousImportedUrl = lastImportedValueRef.current?.url || "";
-      lastSeenUrlRef.current = trimmedUrl;
+    const transitionPlan = getCreateRecordModeTransitionPlan(uiMode, nextMode);
 
-      if (trimmedUrl && trimmedUrl === previousImportedUrl) {
-        return;
-      }
-
-      setPreferredTrackId(null);
-      setImportSession(createImportSession(null));
-      setActiveProvider(trimmedUrl ? "link" : null);
-      setBrowserImportState({
-        status: "idle",
-        sessionToken: null,
-        expiresAt: null,
-        startedAt: null
-      });
-      lastImportedValueRef.current = null;
-    }
-  }, [open, originalUrl, reset]);
-
-  useEffect(() => {
-    if (inputMethod !== "upload") {
-      invalidateTranscriptionRequest();
-      setUploadUiStatus("idle");
-      setHasUploadCompleted(false);
-    }
-  }, [inputMethod]);
-
-  useEffect(() => {
-    if (!open || (inputMethod !== "text" && inputMethod !== "manual")) {
-      return;
+    if (transitionPlan.resetUploadRuntime) {
+      resetUploadRuntimeState();
     }
 
-    let cancelled = false;
-
-    void resolveImport({
-      inputMethod,
-      content,
-      appLanguage
-    }).then((session) => {
-      if (!cancelled) {
-        setImportSession(session);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [appLanguage, content, inputMethod, open]);
-
-  useEffect(() => {
-    if (!open || inputMethod !== "link" || activeProvider === "browser_context") {
-      return;
+    if (transitionPlan.resetImportRuntime) {
+      resetImportRuntimeState();
     }
 
-    const trimmedUrl = originalUrl?.trim() || "";
-    if (!trimmedUrl) {
-      setImportSession(createImportSession(null));
-      return;
-    }
-
-    let cancelled = false;
-    setImportSession((current) => ({
-      result: current.result,
-      flowState: "detecting_platform"
-    }));
-
-    const timer = window.setTimeout(async () => {
-      if (cancelled) {
-        return;
-      }
-
-      setImportSession((current) => ({
-        result: current.result,
-        flowState: "fetching_remote_content"
-      }));
-
-      const session = await resolveImport({
-        inputMethod,
-        originalUrl: trimmedUrl,
-        preferredTrackId,
-        appLanguage
-      });
-
-      if (!cancelled) {
-        setImportSession(session);
-      }
-    }, 450);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [activeProvider, appLanguage, inputMethod, open, originalUrl, preferredTrackId]);
-
-  useEffect(() => {
-    if (
-      !open ||
-      browserImportState.status !== "waiting" ||
-      !browserImportState.sessionToken ||
-      activeProvider !== "browser_context"
-    ) {
-      return;
-    }
-
-    let cancelled = false;
-    const sessionToken = browserImportState.sessionToken;
-
-    const poll = async () => {
-      const session = await resolveBrowserImportSession(sessionToken, appLanguage);
-
-      if (cancelled) {
-        return;
-      }
-
-      if (!session.result) {
-        const currentElapsed =
-          browserImportState.startedAt ? Date.now() - browserImportState.startedAt : 0;
-
-        if (currentElapsed >= BROWSER_IMPORT_FINALIZE_TIMEOUT_MS && hasMeaningfulImportResult(importSession.result)) {
-          setBrowserImportState((current) => ({
-            ...current,
-            status: deriveBrowserImportTerminalStatus(importSession.result)
-          }));
-          return;
-        }
-
-        setImportSession({
-          result: null,
-          flowState: "fetching_remote_content"
-        });
-        return;
-      }
-
-      setImportSession(session);
-      const resolvedResult = session.result;
-      setBrowserImportState((current) => ({
-        ...current,
-        status: deriveBrowserImportTerminalStatus(resolvedResult)
-      }));
-    };
-
-    void poll();
-    const timer = window.setInterval(() => {
-      void poll();
-    }, 1500);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [activeProvider, appLanguage, browserImportState, importSession.result, open]);
-
-  useEffect(() => {
-    if (!open || !importSession.result) {
-      return;
-    }
-
-    applyAutofill({
-      title: importSession.result.detectedTitle || "",
-      content: importSession.result.detectedContent || "",
-      url: importSession.result.originalUrl || ""
-    });
-  }, [getValues, importSession.result, open, setValue]);
-
-  if (!open) {
-    return null;
-  }
-
-  const importResult = importSession.result;
-  const trackOptions = importResult?.availableTracks || [];
-  const selectedTrackId = preferredTrackId || importResult?.selectedTrackId || "";
-  const primaryImportMessage = getPrimaryImportMessage(importSession, importText);
-  const shouldShowImportPanel =
-    inputMethod === "link" &&
-    (Boolean(originalUrl?.trim()) ||
-      browserImportState.status !== "idle" ||
-      !isResultEmpty(importResult));
-  const shouldRecommendTrackSelection =
-    importSession.flowState === "awaiting_track_selection" && !hasDetectedContent(importResult);
-  const browserImportMessage =
-    browserImportState.status === "waiting"
-      ? t.modals.browserImport.waitingDescription
-      : browserImportState.status === "ready"
-        ? t.modals.browserImport.ready
-        : browserImportState.status === "incomplete"
-          ? t.modals.browserImport.incomplete
-          : browserImportState.status === "failed"
-            ? t.modals.browserImport.failed
-            : null;
-  const transcriptionErrorMessage = transcriptionError
-    ? getTranscriptionErrorMessage(
-        transcriptionError.code,
-        appLanguage,
-        TRANSCRIPTION_MAX_FILE_SIZE_BYTES / (1024 * 1024)
-      )
-    : null;
-  const selectedSourceTypeLabel = selectedFileSourceType
-    ? getSourceTypeLabel(selectedFileSourceType, appLanguage)
-    : t.common.emptyValue;
-  const uploadWorkflowSteps = buildUploadWorkflowSteps(selectedFileSourceType, uploadUiStatus, hasUploadCompleted, {
-    upload: t.modals.uploadWorkflowLabelUpload,
-    transcribe: t.modals.uploadWorkflowLabelTranscribe,
-    process: t.modals.uploadWorkflowLabelProcess
-  });
-  const isUploadProcessing = uploadUiStatus === "uploading" || uploadUiStatus === "processing";
-  const uploadStatusDescription =
-    uploadUiStatus === "timeout"
-      ? t.modals.uploadTimeoutDescription
-      : uploadUiStatus === "too_large" || uploadUiStatus === "failed"
-      ? t.modals.uploadFailureDescription
-      : uploadUiStatus === "success"
-        ? t.modals.uploadSuccessDescription
-        : t.modals.uploadProcessingDescription;
-  const currentUploadStatusLabel =
-    uploadUiStatus === "idle" ? null : t.modals.uploadStateLabel[uploadUiStatus];
-  const shouldShowLargeFileHint =
-    selectedFileSize != null &&
-    selectedFileSize >= LARGE_FILE_HINT_THRESHOLD_BYTES &&
-    (uploadUiStatus === "uploading" || uploadUiStatus === "processing");
-  const transcriptionModelAttempts =
-    transcriptionResult?.transcriptionModelAttempts ||
-    transcriptionResult?.transcriptMeta.transcriptionModelAttempts ||
-    transcriptionError?.transcriptionModelAttempts ||
-    [];
-  const transcriptionModelUsed =
-    transcriptionResult?.transcriptionModelUsed ||
-    transcriptionResult?.transcriptMeta.transcriptionModelUsed ||
-    transcriptionError?.transcriptionModelUsed ||
-    null;
-  const formattedModelUsed = formatTranscriptionModelName(transcriptionModelUsed);
-  const formattedModelAttempts = transcriptionModelAttempts
-    .map((model) => formatTranscriptionModelName(model))
-    .filter((model): model is string => Boolean(model));
-  const hasModelFallback =
-    formattedModelAttempts.length > 1 &&
-    formattedModelUsed != null &&
-    formattedModelUsed === formattedModelAttempts.at(-1);
+    setUiMode(nextMode);
+    setValue("inputMethod", mapUiModeToInputMethod(nextMode), { shouldDirty: true });
+  };
 
   const triggerBrowserImport = async () => {
-    setValue("inputMethod", "link", { shouldDirty: true });
-    setActiveProvider("browser_context");
     setImportSession({
       result: null,
       flowState: "fetching_remote_content"
@@ -679,17 +313,9 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
   };
 
   const handleFileSelection = async (file: File | null) => {
-    invalidateTranscriptionRequest();
-    setTranscriptionResult(null);
-    setTranscriptionError(null);
+    resetUploadRuntimeState();
 
     if (!file) {
-      setSelectedFileName(null);
-      setSelectedFileSize(null);
-      setSelectedFileSourceType(null);
-      setHasUploadCompleted(false);
-      setTranscriptionStatus("idle");
-      setUploadUiStatus("idle");
       return;
     }
 
@@ -700,45 +326,41 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
     setSelectedFileName(file.name);
     setSelectedFileSize(file.size);
     setSelectedFileSourceType(inferredSourceType);
-    setHasUploadCompleted(false);
-    setTranscriptionStatus("idle");
     setUploadUiStatus("uploading");
 
     if (!isSupportedTranscriptionFile(file)) {
-      setTranscriptionStatus("transcript_failed");
       setUploadUiStatus("failed");
       setTranscriptionError({
         code: "UNSUPPORTED_FILE_FORMAT",
-        message: "unsupported"
+        message: "unsupported",
+        phase: "failed",
+        failureStage: "upload"
       });
       return;
     }
 
     if (file.size > TRANSCRIPTION_MAX_FILE_SIZE_BYTES) {
-      setTranscriptionStatus("transcript_failed");
       setUploadUiStatus("too_large");
       setTranscriptionError({
         code: "FILE_TOO_LARGE",
-        message: "too large"
+        message: "too large",
+        phase: "failed",
+        failureStage: "upload"
       });
       return;
     }
 
     const response = await transcribeFile(file, appLanguage, {
       onUploadStarted: () => {
-        if (!isCurrentRequest()) {
-          return;
+        if (isCurrentRequest()) {
+          setUploadUiStatus("uploading");
         }
-
-        setUploadUiStatus("uploading");
       },
       onUploadComplete: () => {
-        if (!isCurrentRequest()) {
-          return;
+        if (isCurrentRequest()) {
+          setHasUploadCompleted(true);
+          setUploadUiStatus("processing");
         }
-
-        setHasUploadCompleted(true);
-        setUploadUiStatus("processing");
       }
     });
 
@@ -747,49 +369,13 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
     }
 
     if (!response.success) {
-      setTranscriptionStatus("transcript_failed");
-      setUploadUiStatus(
-        response.error.code === "TRANSCRIPTION_TIMEOUT"
-          ? "timeout"
-          : response.error.code === "FILE_TOO_LARGE"
-            ? "too_large"
-            : "failed"
-      );
-      setTranscriptionError({
-        ...response.error,
-        transcriptionModelUsed: response.meta?.transcriptionModelUsed || null,
-        transcriptionModelAttempts: response.meta?.transcriptionModelAttempts
-      });
+      setUploadUiStatus(getTerminalUploadUiStatus(response));
+      setTranscriptionError(buildClientTranscriptionError(response));
       return;
     }
 
-    const nextResult: ClientTranscriptionResult = {
-      sourceType: response.data.sourceType,
-      suggestedTitle: response.data.suggestedTitle,
-      transcriptText: response.data.transcriptText,
-      transcriptionStatus: response.data.transcriptionStatus,
-      transcriptMeta: {
-        fileName: response.data.fileMeta.fileName,
-        mimeType: response.data.fileMeta.mimeType,
-        size: response.data.fileMeta.size,
-        duration: response.data.fileMeta.duration,
-        language: response.data.language ?? null,
-        segments: response.data.segments,
-        timestamps: response.data.timestamps,
-        provider: "gemini",
-        transcriptionModelUsed: response.data.transcriptionModelUsed || response.data.fileMeta.transcriptionModelUsed || null,
-        transcriptionModelAttempts:
-          response.data.transcriptionModelAttempts || response.data.fileMeta.transcriptionModelAttempts,
-        warnings: response.data.warnings
-      },
-      transcriptionModelUsed: response.data.transcriptionModelUsed || response.data.fileMeta.transcriptionModelUsed || null,
-      transcriptionModelAttempts:
-        response.data.transcriptionModelAttempts || response.data.fileMeta.transcriptionModelAttempts,
-      warnings: response.data.warnings
-    };
-
+    const nextResult = buildClientTranscriptionResult(response);
     setTranscriptionResult(nextResult);
-    setTranscriptionStatus("transcript_needs_review");
     setUploadUiStatus("success");
     applyAutofill({
       title: nextResult.suggestedTitle,
@@ -797,6 +383,279 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
       url: ""
     });
   };
+
+  useEffect(() => {
+    if (!open) {
+      resetModalState();
+      return;
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !isTextEntryMode(uiMode)) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void resolveImport({
+      inputMethod: mapUiModeToInputMethod(uiMode),
+      content,
+      appLanguage
+    }).then((session) => {
+      if (!cancelled) {
+        setImportSession(session);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appLanguage, content, open, uiMode]);
+
+  useEffect(() => {
+    if (!open || uiMode !== "paste_link") {
+      return;
+    }
+
+    const trimmedUrl = originalUrl?.trim() || "";
+    if (trimmedUrl !== lastSeenUrlRef.current) {
+      const previousImportedUrl = lastAutofillSnapshotRef.current.originalUrl.lastValue || "";
+      lastSeenUrlRef.current = trimmedUrl;
+
+      if (trimmedUrl && trimmedUrl === previousImportedUrl) {
+        return;
+      }
+
+      resetPasteLinkRuntimeState();
+      lastSeenUrlRef.current = trimmedUrl;
+    }
+  }, [open, originalUrl, uiMode]);
+
+  useEffect(() => {
+    if (
+      !open ||
+      uiMode !== "browser_import" ||
+      browserImportState.status !== "waiting" ||
+      !browserImportState.sessionToken
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const sessionToken = browserImportState.sessionToken;
+
+    const poll = async () => {
+      const session = await resolveBrowserImportSession(sessionToken, appLanguage);
+
+      if (cancelled) {
+        return;
+      }
+
+      if (!session.result) {
+        const currentElapsed =
+          browserImportState.startedAt ? Date.now() - browserImportState.startedAt : 0;
+
+        if (currentElapsed >= BROWSER_IMPORT_FINALIZE_TIMEOUT_MS && hasMeaningfulImportResult(importSession.result)) {
+          setBrowserImportState((current) => ({
+            ...current,
+            status: deriveBrowserImportTerminalStatus(importSession.result)
+          }));
+          return;
+        }
+
+        setImportSession({
+          result: null,
+          flowState: "fetching_remote_content"
+        });
+        return;
+      }
+
+      setImportSession(session);
+      setBrowserImportState((current) => ({
+        ...current,
+        status: deriveBrowserImportTerminalStatus(session.result)
+      }));
+    };
+
+    void poll();
+    const timer = window.setInterval(() => {
+      void poll();
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [appLanguage, browserImportState, importSession.result, open, uiMode]);
+
+  useEffect(() => {
+    if (!open || uiMode !== "browser_import" || browserImportState.status !== "idle") {
+      return;
+    }
+
+    void triggerBrowserImport();
+  }, [browserImportState.status, open, uiMode]);
+
+  useEffect(() => {
+    if (!open || !importSession.result) {
+      return;
+    }
+
+    applyAutofill({
+      title: importSession.result.detectedTitle || "",
+      content: importSession.result.detectedContent || "",
+      url: importSession.result.originalUrl || ""
+    });
+  }, [getValues, importSession.result, open, setValue]);
+
+  const triggerPasteLinkImport = async () => {
+    const trimmedUrl = getValues("originalUrl")?.trim() || "";
+    if (!trimmedUrl) {
+      return;
+    }
+    const requestId = activeLinkImportRequestRef.current + 1;
+    activeLinkImportRequestRef.current = requestId;
+    const isCurrentRequest = () => activeLinkImportRequestRef.current === requestId;
+
+    setHasAttemptedLinkImport(true);
+    setImportSession((current) => ({
+      result: current.result,
+      flowState: "detecting_platform"
+    }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    setImportSession((current) => ({
+      result: current.result,
+      flowState: "fetching_remote_content"
+    }));
+
+    const session = await resolveImport({
+      inputMethod: "link",
+      originalUrl: trimmedUrl,
+      preferredTrackId,
+      appLanguage
+    });
+
+    if (isCurrentRequest()) {
+      setImportSession(session);
+    }
+  };
+
+  const handlePasteLinkTrackChange = (trackId: string | null) => {
+    setPreferredTrackId(trackId);
+
+    if (!trackId) {
+      return;
+    }
+
+    const nextImportResult = importResult;
+    if (nextImportResult?.source !== "link_bilibili_server") {
+      return;
+    }
+
+    void (async () => {
+      const requestId = activeLinkImportRequestRef.current + 1;
+      activeLinkImportRequestRef.current = requestId;
+      const isCurrentRequest = () => activeLinkImportRequestRef.current === requestId;
+      setHasAttemptedLinkImport(true);
+      setImportSession((current) => ({
+        result: current.result,
+        flowState: "fetching_remote_content"
+      }));
+
+      const session = await resolveImport({
+        inputMethod: "link",
+        originalUrl: getValues("originalUrl")?.trim() || "",
+        preferredTrackId: trackId,
+        appLanguage
+      });
+
+      if (isCurrentRequest()) {
+        setImportSession(session);
+      }
+    })();
+  };
+
+  if (!open) {
+    return null;
+  }
+
+  const modeConfig = getCreateRecordModeConfig(uiMode);
+  const importResult = importSession.result;
+  const trackOptions = importResult?.availableTracks || [];
+  const selectedTrackId = preferredTrackId || importResult?.selectedTrackId || "";
+  const linkImportUiState = derivePasteLinkImportUiState(importSession, hasAttemptedLinkImport);
+  const linkPrimaryMessage =
+    getPasteLinkAwaitingTrackMessage(importSession, appLanguage) ||
+    getPasteLinkPrimaryMessage(linkImportUiState, appLanguage) ||
+    getPasteLinkResultPrimaryMessage(importResult, appLanguage);
+  const linkStatusTone = getPasteLinkStatusTone(linkImportUiState);
+  const linkHelperMessage =
+    getPasteLinkHelperMessage(importResult, appLanguage) ||
+    (importSession.flowState === "awaiting_track_selection"
+      ? importResult?.detectedContent?.trim()
+        ? t.modals.linkImport.partialHelper
+        : t.modals.linkImport.failedHelper
+      : linkImportUiState === "failed_but_editable"
+        ? t.modals.linkImport.failedHelper
+        : null);
+  const modeSection =
+    uiMode === "upload" ? (
+      <CreateRecordUploadSection
+        appLanguage={appLanguage}
+        fileInputRef={fileInputRef}
+        hasUploadCompleted={hasUploadCompleted}
+        onFileChange={(event) => {
+          void handleFileSelection(event.target.files?.[0] || null);
+        }}
+        selectedFileName={selectedFileName}
+        selectedFileSize={selectedFileSize}
+        selectedFileSourceType={selectedFileSourceType}
+        t={t}
+        transcriptionError={transcriptionError}
+        transcriptionResult={transcriptionResult}
+        uploadUiStatus={uploadUiStatus}
+      />
+    ) : uiMode === "paste_link" ? (
+      <CreateRecordLinkSection
+        appLanguage={appLanguage}
+        canTriggerImport={Boolean((originalUrl || "").trim())}
+        hasAttemptedImport={hasAttemptedLinkImport}
+        helperMessage={linkHelperMessage}
+        importResult={importResult}
+        isTriggerDisabled={linkImportUiState === "detecting" || linkImportUiState === "extracting"}
+        linkImportUiState={linkImportUiState}
+        onTrackChange={handlePasteLinkTrackChange}
+        onTriggerImport={() => {
+          void triggerPasteLinkImport();
+        }}
+        primaryMessage={linkPrimaryMessage}
+        selectedTrackId={selectedTrackId}
+        statusTone={linkStatusTone}
+        t={t}
+        trackOptions={trackOptions}
+      />
+    ) : uiMode === "browser_import" ? (
+      <CreateRecordBrowserImportSection
+        appLanguage={appLanguage}
+        browserImportState={browserImportState}
+        importResult={importResult}
+        importSession={importSession}
+        onTrackChange={(trackId) => {
+          if (!trackId || !importResult) {
+            return;
+          }
+
+          setImportSession(selectImportTrack(importResult, trackId, appLanguage));
+        }}
+        onTrigger={() => {
+          void triggerBrowserImport();
+        }}
+        selectedTrackId={selectedTrackId}
+        t={t}
+        trackOptions={trackOptions}
+      />
+    ) : null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-hidden bg-slate-950/55 px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-[calc(env(safe-area-inset-top)+0.75rem)] backdrop-blur-sm md:items-center md:p-4">
@@ -829,7 +688,14 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
         <form
           className="flex min-h-0 flex-1 flex-col"
           onSubmit={handleSubmit(async (values) => {
-            await onSubmit(values, importSession.result, transcriptionResult);
+            const draft = buildCreateRecordDraft({
+              uiMode,
+              values,
+              importResult: importSession.result,
+              transcriptionResult
+            });
+
+            await onSubmit(draft);
             resetModalState();
           })}
         >
@@ -839,371 +705,29 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
           >
             <input type="hidden" {...register("inputMethod")} />
 
-            <div className="space-y-5">
-              <div className="grid gap-3 md:grid-cols-3">
-                {[
-                  ["upload", t.modals.inputMethods.upload],
-                  ["text", t.modals.inputMethods.text],
-                  ["manual", t.modals.inputMethods.manual]
-                ].map(([value, label]) => (
-                  <button
-                    key={value}
-                    className={`rounded-2xl border px-4 py-3 text-sm ${
-                      inputMethod === value ? "border-teal-400 bg-teal-50 text-teal-950" : "border-slate-200 bg-white"
-                    }`}
-                    onClick={() => setValue("inputMethod", value as CreateRecordValues["inputMethod"], { shouldDirty: true })}
-                    type="button"
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  {t.modals.otherImportMethods}
-                </p>
-                <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  <button
-                    className={`rounded-2xl border px-4 py-3 text-sm ${
-                      inputMethod === "link" && activeProvider !== "browser_context"
-                        ? "border-slate-900 bg-slate-900 text-white"
-                        : "border-slate-200 bg-white text-slate-700"
-                    }`}
-                    onClick={() => {
-                      setValue("inputMethod", "link", { shouldDirty: true });
-                      setActiveProvider("link");
-                    }}
-                    type="button"
-                  >
-                    {t.modals.inputMethods.link}
-                  </button>
-                  <button
-                    className={`rounded-2xl border px-4 py-3 text-sm ${
-                      activeProvider === "browser_context"
-                        ? "border-slate-900 bg-slate-900 text-white"
-                        : "border-slate-200 bg-white text-slate-700"
-                    }`}
-                    onClick={() => {
-                      void triggerBrowserImport();
-                    }}
-                    type="button"
-                  >
-                    {t.modals.browserImport.trigger}
-                  </button>
-                </div>
-              </div>
-
-              <label className="block">
-                <span className="mb-2 block text-sm font-medium text-slate-700">{t.modals.optionalTitle}</span>
-                <input
-                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none"
-                  placeholder={t.modals.optionalTitlePlaceholder}
-                  {...register("title")}
+            <CreateRecordFormContent
+              modeHint={<CreateRecordModeHint mode={uiMode} t={t} />}
+              modeSection={modeSection}
+              modeSwitcher={
+                <CreateRecordModeSwitcher
+                  mode={uiMode}
+                  onModeChange={handleModeChange}
+                  t={t}
                 />
-              </label>
-
-              {inputMethod === "upload" ? (
-                <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">{t.modals.uploadTitle}</p>
-                    <p className="mt-1 text-sm text-slate-600">{t.modals.uploadDescription}</p>
-                    <p className="mt-2 text-xs text-slate-500">
-                      {t.modals.uploadHint(
-                        TRANSCRIPTION_MAX_FILE_SIZE_BYTES / (1024 * 1024),
-                        TRANSCRIPTION_RECOMMENDED_MAX_MINUTES
-                      )}
-                    </p>
-                  </div>
-
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-medium text-slate-700">{t.modals.uploadInputLabel}</span>
-                    <input
-                      accept={SUPPORTED_TRANSCRIPTION_ACCEPT}
-                      className="block w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
-                      onChange={(event) => {
-                        void handleFileSelection(event.target.files?.[0] || null);
-                      }}
-                      ref={fileInputRef}
-                      type="file"
-                    />
-                  </label>
-
-                  {selectedFileName ? (
-                    <div
-                      aria-live="polite"
-                      className={`rounded-3xl border px-4 py-4 shadow-subtle ${uploadStatusTone(uploadUiStatus)}`}
-                      data-testid="upload-status-card"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">{t.modals.uploadStatusCardTitle}</p>
-                          <p className="mt-1 text-xs leading-5 text-slate-600">{uploadStatusDescription}</p>
-                          {shouldShowLargeFileHint ? (
-                            <p className="mt-2 text-xs leading-5 text-slate-500">{t.modals.uploadLargeFileHint}</p>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                        <div className="rounded-2xl border border-white/40 bg-white/70 px-3 py-3 text-xs text-slate-700">
-                          <p className="font-medium text-slate-900">{t.modals.fileName}</p>
-                          <p className="mt-1 break-all">{selectedFileName}</p>
-                        </div>
-                        <div className="rounded-2xl border border-white/40 bg-white/70 px-3 py-3 text-xs text-slate-700">
-                          <p className="font-medium text-slate-900">{t.modals.fileType}</p>
-                          <p className="mt-1">{selectedSourceTypeLabel}</p>
-                        </div>
-                        <div className="rounded-2xl border border-white/40 bg-white/70 px-3 py-3 text-xs text-slate-700">
-                          <p className="font-medium text-slate-900">{t.modals.uploadFileSize}</p>
-                          <p className="mt-1">{selectedFileSize != null ? formatFileSize(selectedFileSize) : t.common.emptyValue}</p>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 rounded-2xl border border-white/40 bg-white/70 px-3 py-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                          {t.modals.uploadCurrentStatus}
-                        </p>
-                        <div className="mt-2 flex items-center gap-2">
-                          {isUploadProcessing ? (
-                            <span
-                              aria-hidden="true"
-                              className="inline-flex h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent text-slate-700"
-                              data-testid="upload-status-spinner"
-                            />
-                          ) : (
-                            <span
-                              aria-hidden="true"
-                              className={`inline-flex h-2.5 w-2.5 rounded-full ${
-                                uploadUiStatus === "timeout"
-                                  ? "bg-orange-500"
-                                  : uploadUiStatus === "too_large" || uploadUiStatus === "failed"
-                                    ? "bg-rose-500"
-                                    : "bg-emerald-500"
-                              }`}
-                            />
-                          )}
-                          <p className="text-sm font-medium text-slate-900">
-                            {currentUploadStatusLabel}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 rounded-2xl border border-white/40 bg-white/70 px-3 py-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                          {t.modals.uploadSteps}
-                        </p>
-                        <div className="mt-3 space-y-2">
-                          {uploadWorkflowSteps.map((step) => (
-                            <div
-                              key={step.key}
-                              className={`flex items-center gap-3 text-sm ${uploadWorkflowTone(step.state).text}`}
-                              data-step-state={step.state}
-                              data-testid={`upload-workflow-step-${step.key}`}
-                            >
-                              <span
-                                aria-hidden="true"
-                                className={`inline-flex h-2.5 w-2.5 rounded-full ${uploadWorkflowTone(step.state).dot}`}
-                              />
-                              <span>{step.label}</span>
-                            </div>
-                          ))}
-                        </div>
-                        {selectedFileSourceType === "video" ? (
-                          <p className="mt-3 text-xs leading-5 text-slate-500">{t.modals.uploadWorkflowVideoHelper}</p>
-                        ) : null}
-                      </div>
-
-                      {formattedModelUsed || formattedModelAttempts.length ? (
-                        <div className="mt-4 rounded-2xl border border-white/40 bg-white/70 px-3 py-3 text-sm text-slate-700">
-                          {formattedModelAttempts.length > 1 ? (
-                            <p>
-                              <span className="font-medium text-slate-900">{t.modals.uploadModelAttempts}: </span>
-                              {formattedModelAttempts.join(" → ")}
-                            </p>
-                          ) : formattedModelUsed ? (
-                            <p>
-                              <span className="font-medium text-slate-900">{t.modals.uploadModelUsed}: </span>
-                              {formattedModelUsed}
-                              {hasModelFallback ? `（${t.modals.uploadModelFallback}）` : ""}
-                            </p>
-                          ) : null}
-                        </div>
-                      ) : null}
-
-                      {transcriptionErrorMessage ? (
-                        <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-700">
-                          <p>{transcriptionErrorMessage}</p>
-                          <p className="mt-1">{t.errors.youCanContinueEditingManually}</p>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-
-                  {transcriptionResult?.transcriptMeta ? (
-                    <div className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600">
-                      <p className="font-medium text-slate-700">{t.modals.transcriptMetadata}</p>
-                      <p>
-                        {t.modals.fileName}: {transcriptionResult.transcriptMeta.fileName}
-                      </p>
-                      <p>
-                        {t.modals.fileType}: {transcriptionResult.transcriptMeta.mimeType}
-                      </p>
-                      <p>
-                        {t.modals.language}: {transcriptionResult.transcriptMeta.language || t.common.emptyValue}
-                      </p>
-                      <p>
-                        {t.modals.segments}: {transcriptionResult.transcriptMeta.segments?.length ?? 0}
-                      </p>
-                      <p>
-                        {t.modals.timestamps}: {transcriptionResult.transcriptMeta.timestamps?.length ?? 0}
-                      </p>
-                      {formattedModelUsed ? (
-                        <p>
-                          {t.modals.uploadModelUsed}: {formattedModelUsed}
-                        </p>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {inputMethod === "link" ? (
-                <label className="block">
-                  <span className="mb-2 block text-sm font-medium text-slate-700">{t.modals.originalUrl}</span>
-                  <input
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none"
-                    placeholder="https://..."
-                    {...register("originalUrl")}
+              }
+              primaryFields={<CreateRecordPrimaryFields mode={uiMode} register={register} t={t} />}
+              secondaryFields={
+                modeConfig.showSecondaryMeta ? (
+                  <CreateRecordSecondaryFields
+                    appLanguage={appLanguage}
+                    folders={folders}
+                    register={register}
+                    t={t}
+                    tags={tags}
                   />
-
-                  <div className="mt-3 flex items-start justify-between gap-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-3">
-                    <div className="text-xs leading-5 text-slate-600">
-                      <p className="font-medium text-slate-700">{t.modals.browserImport.waitingTitle}</p>
-                      <p>{browserImportMessage || t.modals.browserImport.waitingDescription}</p>
-                    </div>
-                    <button
-                      className="shrink-0 rounded-2xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
-                      type="button"
-                      disabled={browserImportState.status === "waiting"}
-                      onClick={() => {
-                        void triggerBrowserImport();
-                      }}
-                    >
-                      {t.modals.browserImport.trigger}
-                    </button>
-                  </div>
-
-                  {shouldShowImportPanel ? (
-                    <div className="mt-2 space-y-2">
-                      {primaryImportMessage ? (
-                        <p
-                          aria-live="polite"
-                          className={`rounded-2xl border px-3 py-2 text-xs leading-6 ${getStatusTone(importSession.flowState, importResult)}`}
-                        >
-                          {primaryImportMessage}
-                        </p>
-                      ) : null}
-
-                      {importResult ? (
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
-                          {trackOptions.length > 0 ? (
-                            <p className="font-medium text-slate-700">{importText.trackCountLabel(trackOptions.length)}</p>
-                          ) : null}
-
-                          {trackOptions.length > 1 ? (
-                            <label className="mt-3 block">
-                              <span className="mb-2 block font-medium text-slate-700">
-                                {t.modals.bilibiliImport.trackSelectLabel}
-                              </span>
-                              <select
-                                aria-label={t.modals.bilibiliImport.trackSelectLabel}
-                                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none"
-                                value={selectedTrackId}
-                                onChange={(event) => {
-                                  const nextTrackId = event.target.value || null;
-                                  if (!nextTrackId) {
-                                    setPreferredTrackId(null);
-                                    return;
-                                  }
-
-                                  if (importResult?.source === "browser_context") {
-                                    setImportSession(selectImportTrack(importResult, nextTrackId, appLanguage));
-                                    return;
-                                  }
-
-                                  setPreferredTrackId(nextTrackId);
-                                }}
-                              >
-                                {!selectedTrackId ? <option value="">{importText.selectTrackPlaceholder}</option> : null}
-                                {trackOptions.map((track) => (
-                                  <option key={track.id} value={track.id}>
-                                    {track.label}
-                                  </option>
-                                ))}
-                              </select>
-                              <span className="mt-2 block text-[11px] text-slate-500">
-                                {shouldRecommendTrackSelection ? importText.selectTrackRecommended : importText.multipleTracksAvailable}
-                              </span>
-                            </label>
-                          ) : null}
-
-                          {importResult.warnings.length ? (
-                            <div className="mt-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[11px] leading-5 text-slate-600">
-                              <p className="font-medium text-slate-700">{importText.warningsTitle}</p>
-                              {importResult.warnings.map((warning) => (
-                                <p key={warning.code}>{warning.message}</p>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </label>
-              ) : null}
-
-              <label className="block">
-                <span className="mb-2 block text-sm font-medium text-slate-700">
-                  {inputMethod === "upload"
-                    ? t.modals.originalTranscript
-                    : inputMethod === "manual"
-                      ? t.modals.manualContent
-                      : t.modals.content}
-                </span>
-                <textarea
-                  className="min-h-40 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-7 outline-none"
-                  placeholder={t.modals.contentPlaceholder}
-                  {...register("content")}
-                />
-              </label>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="block">
-                  <span className="mb-2 block text-sm font-medium text-slate-700">{t.modals.folder}</span>
-                  <select
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none"
-                    {...register("folderId")}
-                  >
-                    <option value="">{t.common.systemFolder}</option>
-                    {folders.map((folder) => (
-                      <option key={folder.id} value={folder.id}>
-                        {getFolderDisplayName(folder, appLanguage)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="block">
-                  <span className="mb-2 block text-sm font-medium text-slate-700">{t.modals.tags}</span>
-                  <input
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none"
-                    placeholder={t.modals.tagsPlaceholder(tags[0]?.name || null)}
-                    {...register("tagsText")}
-                  />
-                </label>
-              </div>
-            </div>
+                ) : null
+              }
+            />
           </div>
 
           <div
@@ -1220,13 +744,14 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
             <button
               className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
               disabled={
-                (importSession.flowState === "fetching_remote_content" && activeProvider !== "browser_context") ||
+                (uiMode === "paste_link" &&
+                  (linkImportUiState === "detecting" || linkImportUiState === "extracting")) ||
                 uploadUiStatus === "uploading" ||
                 uploadUiStatus === "processing"
               }
               type="submit"
             >
-              {t.modals.createRecord}
+              {getCreateRecordSubmitLabel(t, uiMode)}
             </button>
           </div>
         </form>

@@ -24,6 +24,35 @@ export type BilibiliImportErrorCode =
   | "BILIBILI_REQUEST_FAILED"
   | "INTERNAL_ERROR";
 
+export type ArticleImportErrorCode = "INVALID_URL" | "INTERNAL_ERROR";
+export type ArticleImportExtractionMethod = "readability" | "meta_fallback" | "none";
+export type ArticleImportWarningCode =
+  | "FETCH_FAILED"
+  | "SECURITY_BLOCKED"
+  | "TOO_MANY_REDIRECTS"
+  | "UNSUPPORTED_CONTENT_TYPE"
+  | "CONTENT_TOO_LARGE"
+  | "EXTRACTION_EMPTY"
+  | "META_ONLY"
+  | "OCR_NOT_ATTEMPTED"
+  | "OCR_PROVIDER_UNAVAILABLE"
+  | "OCR_NO_TEXT_DETECTED"
+  | "MANUAL_COMPLETION_REQUIRED"
+  | "UNKNOWN_ERROR";
+export type ArticleImportExtractionSource = "html_text" | "meta_excerpt" | "image_ocr";
+export type ArticleImportOcrStatus =
+  | "not_applicable"
+  | "not_attempted"
+  | "provider_unavailable"
+  | "attempted_no_text"
+  | "partial"
+  | "successful";
+export type ArticleImportCoverageLevel = "full" | "partial" | "limited" | "minimal";
+export type ArticleImportCandidateSelectionReason =
+  | "limited_by_cap"
+  | "filtered_non_body_images"
+  | "partial_page_signals_only";
+
 export type TranscriptionErrorCode =
   | "INVALID_UPLOAD"
   | "UNSUPPORTED_FILE_FORMAT"
@@ -35,6 +64,15 @@ export type TranscriptionErrorCode =
   | "INTERNAL_ERROR";
 
 export type TranscriptionSourceType = "video" | "audio";
+export type TranscriptionPhase =
+  | "uploaded"
+  | "preprocessing"
+  | "transcribing"
+  | "transcript_ready"
+  | "ai_processing"
+  | "completed"
+  | "failed";
+export type TranscriptionFailureStage = "upload" | "preprocessing" | "transcription" | "unknown";
 export type TranscriptionStatus =
   | "idle"
   | "file_uploaded"
@@ -84,6 +122,61 @@ export interface BilibiliImportRequestBody {
   url: string;
   preferredTrackId?: string;
 }
+
+export interface ArticleImportRequestBody {
+  url: string;
+}
+
+export interface ArticleImportWarning {
+  code: ArticleImportWarningCode;
+  message: string;
+}
+
+export interface ArticleImportExtractionReport {
+  extractionSources: ArticleImportExtractionSource[];
+  hasHtmlText: boolean;
+  hasImageOcrText: boolean;
+  htmlTextLength: number;
+  imageSignalsFound: number;
+  candidateImagesSelected: number;
+  ocrAttemptLimit: number;
+  candidateSelectionReasons: ArticleImportCandidateSelectionReason[];
+  imageOcrAttempted: number;
+  imageOcrSucceeded: number;
+  imageOcrTextLength: number;
+  ocrStatus: ArticleImportOcrStatus;
+  coverageLevel: ArticleImportCoverageLevel;
+}
+
+export interface ArticleImportData {
+  originalUrl: string;
+  resolvedUrl: string | null;
+  platform: "bilibili" | "xiaohongshu" | "other" | "unknown";
+  title: string | null;
+  excerpt: string | null;
+  contentText: string | null;
+  fetchSucceeded: boolean;
+  extractionMethod: ArticleImportExtractionMethod;
+  extractionReport: ArticleImportExtractionReport;
+  warnings: ArticleImportWarning[];
+}
+
+export interface ArticleImportSuccessResponse {
+  success: true;
+  data: ArticleImportData;
+  error: null;
+}
+
+export interface ArticleImportFailureResponse {
+  success: false;
+  data: null;
+  error: {
+    code: ArticleImportErrorCode;
+    message: string;
+  };
+}
+
+export type ArticleImportResponse = ArticleImportSuccessResponse | ArticleImportFailureResponse;
 
 export interface BilibiliSubtitleTrack {
   id: string;
@@ -136,6 +229,7 @@ export type BilibiliImportResponse = BilibiliImportSuccessResponse | BilibiliImp
 export interface TranscriptionSuccessResponse {
   success: true;
   data: {
+    phase: TranscriptionPhase;
     sourceType: TranscriptionSourceType;
     suggestedTitle: string;
     transcriptText: string;
@@ -166,6 +260,8 @@ export interface TranscriptionFailureResponse {
     message: string;
   };
   meta?: {
+    phase?: Extract<TranscriptionPhase, "failed">;
+    failureStage?: TranscriptionFailureStage;
     transcriptionModelUsed?: string;
     transcriptionModelAttempts?: string[];
   };
@@ -188,9 +284,19 @@ export type BrowserContextImportIssueCode =
   | "VISIBLE_CAPTION_ONLY"
   | "TRANSCRIPT_NOT_FOUND"
   | "TRANSCRIPT_TOO_SHORT"
+  | "SECURITY_BLOCKED"
+  | "TOO_MANY_REDIRECTS"
+  | "UNSUPPORTED_CONTENT_TYPE"
+  | "CONTENT_TOO_LARGE"
+  | "EXTRACTION_EMPTY"
+  | "META_ONLY"
+  | "OCR_NOT_ATTEMPTED"
+  | "OCR_PROVIDER_UNAVAILABLE"
+  | "OCR_NO_TEXT_DETECTED"
   | "MANUAL_COMPLETION_REQUIRED"
   | "COOKIE_REQUIRED_POSSIBLE"
   | "MULTIPLE_TRACKS_NEED_SELECTION"
+  | "FETCH_FAILED"
   | "NETWORK_ERROR"
   | "UNKNOWN_ERROR";
 

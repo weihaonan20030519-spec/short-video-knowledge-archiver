@@ -201,6 +201,44 @@ describe("DetailPane AI knowledge view", () => {
     expect(transcriptionStatusField).toHaveTextContent("转写状态: 转写已就绪");
   }, 10000);
 
+  it("renders the media asset skeleton for records without archived media", () => {
+    const record = createRecord({
+      mediaAsset: {
+        storageMode: "none",
+        rootId: null,
+        relativePath: null,
+        fileName: "clip.mp3",
+        mimeType: "audio/mpeg",
+        size: 1024,
+        duration: 15,
+        sourceType: "audio",
+        availability: "not_archived",
+        lastVerifiedAt: null,
+        lastKnownError: null
+      }
+    });
+
+    render(
+      <DetailPane
+        record={record}
+        folders={[createFolder({ id: "folder-media", name: "研究素材" })]}
+        tags={[]}
+        onAnalyze={vi.fn().mockResolvedValue(undefined)}
+        onDeleteRecord={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "媒体资产" })).toBeInTheDocument();
+    expect(screen.getByText("存储模式: 未归档")).toBeInTheDocument();
+    expect(
+      screen.getByText((_, node) => {
+        const text = node?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+        return text === "媒体状态: 未保留原始媒体";
+      })
+    ).toBeInTheDocument();
+    expect(screen.getByText("当前记录未保留原始媒体，仅保存文本归档与相关元信息。")).toBeInTheDocument();
+  });
+
   it("shows loading feedback immediately and preserves the previous result while re-analyzing", async () => {
     let resolveAnalyze: (() => void) | undefined;
     const onAnalyze = vi.fn(

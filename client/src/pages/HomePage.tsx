@@ -18,12 +18,8 @@ import { folderRepository } from "../db/repositories/folderRepository";
 import { recordRepository } from "../db/repositories/recordRepository";
 import { tagRepository } from "../db/repositories/tagRepository";
 import { analyzeRecord } from "../services/aiService";
-import { buildRecordImportSnapshot } from "../services/import/importCoordinator";
-import type { ImportResult } from "../services/import/importTypes";
-import type { ClientTranscriptionResult } from "../services/transcription/transcriptionTypes";
-import { buildRecordTitle } from "../lib/title";
+import type { CreateRecordDraft } from "../features/create-record/buildCreateRecordDraft";
 import { isDuplicateFolderName, isDuplicateTagName, normalizeCollectionName } from "../lib/collection";
-import { detectPlatform, extractLinkTitle } from "../lib/platform";
 import { createConciseAiSlot, createLearningAiSlot } from "../lib/aiTransform";
 import { exportFolderToPdf } from "../lib/exportPdf";
 import {
@@ -40,7 +36,6 @@ import type {
   RecordItem,
   Tag
 } from "../types/domain";
-import type { CreateRecordValues } from "../types/forms";
 
 type CollectionModalState =
   | { entity: "folder"; mode: "create"; target: null }
@@ -151,57 +146,9 @@ export function HomePage() {
   const normalizedTags = tags;
   const uncategorizedCount = countUncategorizedRecords(records, normalizedFolders);
 
-  const handleCreateRecord = async (
-    values: CreateRecordValues,
-    importResult: ImportResult | null,
-    transcriptionResult: ClientTranscriptionResult | null
-  ) => {
-    const createdAt = new Date().toISOString();
-    const importSnapshot = buildRecordImportSnapshot(importResult);
-    const originalUrl =
-      values.inputMethod === "link"
-        ? importSnapshot.originalUrl || values.originalUrl?.trim() || null
-        : null;
-    const originalContent =
-      values.content?.trim() || transcriptionResult?.transcriptText || importSnapshot.detectedContent || "";
-    const sourcePlatform =
-      values.inputMethod === "link" ? detectPlatform(originalUrl) : importSnapshot.platform;
-    const sourceType =
-      transcriptionResult?.sourceType ||
-      (values.inputMethod === "link"
-        ? "link"
-        : values.inputMethod === "manual"
-          ? "manual"
-          : "text");
-    const contentCompleteness =
-      transcriptionResult != null
-        ? originalContent.trim()
-          ? "full"
-          : "none"
-        : importSnapshot.importSummary?.contentCompleteness === "full"
-          ? "full"
-          : importSnapshot.importSummary?.contentCompleteness === "partial"
-            ? "partial"
-            : originalContent.trim()
-              ? "minimal"
-              : "none";
-
-    const title = buildRecordTitle({
-      userTitle: values.title,
-      linkTitle: values.inputMethod === "upload"
-        ? transcriptionResult?.suggestedTitle || importSnapshot.detectedTitle || undefined
-        : importSnapshot.detectedTitle || extractLinkTitle(originalUrl) || undefined,
-      content: originalContent,
-      createdAt
-    });
-
-    const tagNames = values.tagsText
-      ?.split(",")
-      .map((item) => item.trim())
-      .filter(Boolean) || [];
-
+  const handleCreateRecord = async (draft: CreateRecordDraft) => {
     const tagIds: string[] = [];
-    for (const tagName of tagNames) {
+    for (const tagName of draft.tagNames) {
       const existing = normalizedTags.find((tag) => tag.name === tagName);
       if (existing) {
         tagIds.push(existing.id);
@@ -222,25 +169,26 @@ export function HomePage() {
 
     const record: RecordItem = {
       id: crypto.randomUUID(),
-      title,
-      sourcePlatform,
-      sourceType,
-      inputMethod: values.inputMethod,
-      originalUrl,
-      folderId: values.folderId || null,
+      title: draft.title,
+      sourcePlatform: draft.sourcePlatform,
+      sourceType: draft.sourceType,
+      inputMethod: draft.inputMethod,
+      originalUrl: draft.originalUrl,
+      folderId: draft.folderId,
       tagIds,
-      createdAt,
-      updatedAt: createdAt,
+      createdAt: draft.createdAt,
+      updatedAt: draft.createdAt,
       watchedAt: null,
       lastViewedAt: null,
-      originalContent,
+      originalContent: draft.originalContent,
       personalNote: "",
-      transcriptionStatus: transcriptionResult?.transcriptionStatus || "idle",
-      contentCompleteness,
-      transcriptMeta: transcriptionResult?.transcriptMeta || null,
+      transcriptionStatus: draft.transcriptionStatus,
+      contentCompleteness: draft.contentCompleteness,
+      transcriptMeta: draft.transcriptMeta,
+      mediaAsset: draft.mediaAsset,
       aiStatus: "not_started",
       aiErrorMessage: null,
-      importSummary: importSnapshot.importSummary,
+      importSummary: draft.importSummary,
       currentMode: null,
       aiOutputs: {
         concise: null,

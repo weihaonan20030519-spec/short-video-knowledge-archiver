@@ -1,12 +1,17 @@
 import { promises as fs } from "node:fs";
 
 import type { AudioExtractionService } from "./audioExtractionService.js";
+import {
+  preprocessMediaFile,
+  type MediaMetadataProbe
+} from "./mediaPreprocessingService.js";
 import type { TranscriptionProvider } from "./transcriptionProvider.js";
 import { normalizeTranscriptResult } from "./normalizeTranscriptResult.js";
 import { validateMediaFile } from "./mediaValidation.js";
 import type { TranscriptionResponse } from "../../schemas/transcriptionSchemas.js";
 import { ApiError } from "../../utils/errors.js";
 import { logger } from "../../utils/logger.js";
+import type { TranscriptionFailureStage, TranscriptionPhase } from "./transcriptionPhases.js";
 
 export interface UploadedTranscriptionFile {
   path: string;
@@ -22,6 +27,7 @@ export interface TranscriptionServiceOptions {
 export interface TranscriptionServiceDependencies {
   transcriptionProvider: TranscriptionProvider;
   audioExtractionService: AudioExtractionService;
+  probeMediaMetadata?: MediaMetadataProbe;
 }
 
 async function safeUnlink(filePath: string | null | undefined) {
@@ -41,41 +47,69 @@ async function safeUnlink(filePath: string | null | undefined) {
   });
 }
 
+function attachFailureStage(error: unknown, failureStage: TranscriptionFailureStage) {
+  if (error instanceof ApiError) {
+    return new ApiError(error.code, error.message, error.status, {
+      ...error.details,
+      failureStage
+    });
+  }
+
+  return new ApiError("INTERNAL_ERROR", "Internal server error", 500, {
+    failureStage
+  });
+}
+
 export async function transcribeUploadedFile(
   file: UploadedTranscriptionFile | undefined,
   options: TranscriptionServiceOptions,
   dependencies: TranscriptionServiceDependencies
 ): Promise<TranscriptionResponse> {
   if (!file) {
-    throw new ApiError("INVALID_UPLOAD", "A single audio or video file is required", 400);
+    throw new ApiError("INVALID_UPLOAD", "A single audio or video file is required", 400, {
+      phase: "failed" satisfies TranscriptionPhase,
+      failureStage: "upload" satisfies TranscriptionFailureStage
+    });
   }
 
   const validated = validateMediaFile(file.originalname, file.mimetype);
 
   if (!validated) {
-    throw new ApiError("UNSUPPORTED_FILE_FORMAT", "The uploaded file format is not supported", 415);
+    throw new ApiError("UNSUPPORTED_FILE_FORMAT", "The uploaded file format is not supported", 415, {
+      phase: "failed" satisfies TranscriptionPhase,
+      failureStage: "upload" satisfies TranscriptionFailureStage
+    });
   }
 
   const cleanupTargets = [file.path];
-  let transcriptionPath = file.path;
-  let transcriptionMimeType = validated.normalizedMimeType;
 
   try {
-    if (validated.sourceType === "video") {
-      const extractedAudio = await dependencies.audioExtractionService.extractAudio({
-        sourcePath: file.path
-      });
-      cleanupTargets.push(extractedAudio.outputPath);
-      transcriptionPath = extractedAudio.outputPath;
-      transcriptionMimeType = extractedAudio.mimeType;
-    }
+    const preprocessingResult = await preprocessMediaFile(
+      {
+        filePath: file.path,
+        fileName: file.originalname,
+        mimeType: file.mimetype,
+        size: file.size,
+        validatedMedia: validated
+      },
+      {
+        audioExtractionService: dependencies.audioExtractionService,
+        probeMediaMetadata: dependencies.probeMediaMetadata
+      }
+    ).catch((error) => {
+      throw attachFailureStage(error, "preprocessing");
+    });
+
+    cleanupTargets.push(...preprocessingResult.cleanupPaths);
 
     const providerOutput = await dependencies.transcriptionProvider.transcribe({
-      filePath: transcriptionPath,
-      mimeType: transcriptionMimeType,
+      filePath: preprocessingResult.transcriptionInput.filePath,
+      mimeType: preprocessingResult.transcriptionInput.mimeType,
       fileName: file.originalname,
       sourceType: validated.sourceType,
       languageHint: options.languageHint
+    }).catch((error) => {
+      throw attachFailureStage(error, "transcription");
     });
 
     return normalizeTranscriptResult({
@@ -83,7 +117,8 @@ export async function transcribeUploadedFile(
       fileMeta: {
         fileName: file.originalname,
         mimeType: file.mimetype,
-        size: file.size
+        size: file.size,
+        duration: preprocessingResult.mediaMetadata.duration
       },
       providerName: dependencies.transcriptionProvider.name,
       languageHint: options.languageHint,
@@ -94,6 +129,20 @@ export async function transcribeUploadedFile(
           `Provider: ${dependencies.transcriptionProvider.name}`
         ]
       }
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw new ApiError(error.code, error.message, error.status, {
+        ...error.details,
+        phase: "failed" satisfies TranscriptionPhase,
+        failureStage:
+          (error.details?.failureStage as TranscriptionFailureStage | undefined) || "unknown"
+      });
+    }
+
+    throw new ApiError("INTERNAL_ERROR", "Internal server error", 500, {
+      phase: "failed" satisfies TranscriptionPhase,
+      failureStage: "unknown" satisfies TranscriptionFailureStage
     });
   } finally {
     await Promise.all(cleanupTargets.map((target) => safeUnlink(target)));

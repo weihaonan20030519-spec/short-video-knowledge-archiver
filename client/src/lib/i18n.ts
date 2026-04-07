@@ -145,6 +145,12 @@ type Dictionary = {
     deleteRecord: string;
     title: string;
     transcriptMetadata: string;
+    mediaAsset: {
+      title: string;
+      storageMode: string;
+      availability: string;
+      fileSize: string;
+    };
     fileName: string;
     fileType: string;
     duration: string;
@@ -179,6 +185,14 @@ type Dictionary = {
       text: string;
       manual: string;
     };
+    modeHelpers: Record<
+      "upload" | "paste_text" | "blank" | "paste_link" | "browser_import",
+      string
+    >;
+    createRecordCta: Record<
+      "upload" | "paste_text" | "blank" | "paste_link" | "browser_import",
+      string
+    >;
     uploadTitle: string;
     uploadDescription: string;
     uploadInputLabel: string;
@@ -191,6 +205,16 @@ type Dictionary = {
     uploadWorkflowLabelTranscribe: string;
     uploadWorkflowLabelProcess: string;
     uploadWorkflowVideoHelper: string;
+    archiveModePlaceholderTitle: string;
+    archiveModePlaceholderDescription: string;
+    archiveModePlaceholderAction: string;
+    failureStagePrefix: string;
+    failureStageLabel: {
+      upload: string;
+      preprocessing: string;
+      transcription: string;
+      unknown: string;
+    };
     uploadModelUsed: string;
     uploadModelAttempts: string;
     uploadModelFallback: string;
@@ -218,7 +242,12 @@ type Dictionary = {
     originalUrl: string;
     content: string;
     manualContent: string;
+    blankContentLabel: string;
+    pasteTextContentLabel: string;
     contentPlaceholder: string;
+    blankContentPlaceholder: string;
+    pasteTextContentPlaceholder: string;
+    linkContentPlaceholder: string;
     folder: string;
     tags: string;
     tagsPlaceholder: (sample: string | null) => string;
@@ -239,6 +268,13 @@ type Dictionary = {
       trackCountLabel: (count: number) => string;
       cookieUsed: string;
       cookieMissing: string;
+    };
+    linkImport: {
+      title: string;
+      description: string;
+      trigger: string;
+      partialHelper: string;
+      failedHelper: string;
     };
     browserImport: {
       trigger: string;
@@ -262,6 +298,14 @@ type Dictionary = {
     tagNamePlaceholder: string;
     nameRequired: string;
     nameTooLong: string;
+  };
+  mediaAsset: {
+    storageMode: Record<"none" | "local_archive_dir", string>;
+    availability: Record<"ready" | "missing" | "permission_required" | "write_failed" | "not_archived", string>;
+    availabilityDescription: Record<
+      "ready" | "missing" | "permission_required" | "write_failed" | "not_archived",
+      string
+    >;
   };
   confirm: {
     defaultTitle: string;
@@ -318,6 +362,8 @@ type Dictionary = {
   sourceType: Record<SourceType, string>;
   highlightTone: Record<HighlightTone, string>;
 };
+
+export type MessageDictionary = Dictionary;
 
 export const messages: Record<AppLanguage, Dictionary> = {
   "zh-CN": {
@@ -416,6 +462,12 @@ export const messages: Record<AppLanguage, Dictionary> = {
       deleteRecord: "删除记录",
       title: "标题",
       transcriptMetadata: "转写元信息",
+      mediaAsset: {
+        title: "媒体资产",
+        storageMode: "存储模式",
+        availability: "媒体状态",
+        fileSize: "文件大小"
+      },
       fileName: "文件名",
       fileType: "文件类型",
       duration: "时长",
@@ -448,7 +500,21 @@ export const messages: Record<AppLanguage, Dictionary> = {
         upload: "上传文件",
         link: "粘贴链接",
         text: "粘贴文本",
-        manual: "手动新建"
+        manual: "空白新建"
+      },
+      modeHelpers: {
+        upload: "上传单个音视频文件，并在转写完成后继续编辑原始内容。",
+        paste_text: "粘贴已有文本、字幕或笔记，直接进入后续整理。",
+        blank: "从空白开始写一条记录，适合先记下线索，再逐步补全内容。",
+        paste_link: "粘贴链接后可尝试辅助提取内容，AI 最终仍以表单中的文本为准；若提取不完整，请补充正文、字幕或笔记。",
+        browser_import: "通过浏览器扩展辅助导入当前页面上下文，再检查并补全文本内容。"
+      },
+      createRecordCta: {
+        upload: "创建记录",
+        paste_text: "创建记录",
+        blank: "创建记录",
+        paste_link: "创建记录",
+        browser_import: "创建记录"
       },
       uploadTitle: "上传视频或音频",
       uploadDescription: "上传单个音视频文件，系统会先转写，再把文本填入唯一的原始内容编辑区。",
@@ -463,6 +529,16 @@ export const messages: Record<AppLanguage, Dictionary> = {
       uploadWorkflowLabelTranscribe: "转写",
       uploadWorkflowLabelProcess: "处理",
       uploadWorkflowVideoHelper: "处理包含提取音频与转写。",
+      archiveModePlaceholderTitle: "本地归档目录",
+      archiveModePlaceholderDescription: "后续版本将支持把原始音视频保存到本地归档目录，并在详情页中重新回看。",
+      archiveModePlaceholderAction: "即将支持",
+      failureStagePrefix: "失败阶段",
+      failureStageLabel: {
+        upload: "上传",
+        preprocessing: "预处理",
+        transcription: "转写",
+        unknown: "未知阶段"
+      },
       uploadModelUsed: "转写模型",
       uploadModelAttempts: "转写尝试模型",
       uploadModelFallback: "自动回退",
@@ -505,7 +581,12 @@ export const messages: Record<AppLanguage, Dictionary> = {
       originalUrl: "原始链接",
       content: "原始内容 / 字幕 / 备注",
       manualContent: "原始内容（可稍后补充）",
+      blankContentLabel: "起始内容",
+      pasteTextContentLabel: "粘贴文本",
       contentPlaceholder: "AI 只能基于这里的文本整理。链接模式下也建议补充正文、字幕或笔记。",
+      blankContentPlaceholder: "从空白开始写下你当前掌握的线索、片段或问题。",
+      pasteTextContentPlaceholder: "粘贴已有文本、字幕、摘录或笔记，AI 会基于这里的内容继续整理。",
+      linkContentPlaceholder: "可补充正文、字幕或笔记。当前链接模式下，AI 仍主要基于这里的文本整理。",
       folder: "文件夹",
       tags: "标签（逗号分隔，可选）",
       tagsPlaceholder: (sample) => (sample ? `例如：${sample}` : "例如：职场, 运营"),
@@ -526,6 +607,13 @@ export const messages: Record<AppLanguage, Dictionary> = {
         trackCountLabel: (count) => `共探测到 ${count} 条字幕轨`,
         cookieUsed: "已携带 B 站 cookie",
         cookieMissing: "当前为匿名请求"
+      },
+      linkImport: {
+        title: "链接辅助导入",
+        description: "系统会尽力从链接中提取可用于整理的文本；如果提取不足，仍可保留链接并手动补正文。",
+        trigger: "尝试提取链接内容",
+        partialHelper: "已导入部分文本。若是小红书文章或图文，建议再补充正文、字幕或笔记后再整理。",
+        failedHelper: "未能自动提取可用正文，但不会阻止你继续手动填写并创建记录。"
       },
       browserImport: {
         trigger: "浏览器导入（Beta）",
@@ -549,6 +637,26 @@ export const messages: Record<AppLanguage, Dictionary> = {
       tagNamePlaceholder: "输入标签名称",
       nameRequired: "名称不能为空",
       nameTooLong: "名称请控制在 40 字以内"
+    },
+    mediaAsset: {
+      storageMode: {
+        none: "未归档",
+        local_archive_dir: "本地归档目录"
+      },
+      availability: {
+        ready: "媒体可用",
+        missing: "媒体已缺失",
+        permission_required: "需要重新授权",
+        write_failed: "归档失败",
+        not_archived: "未保留原始媒体"
+      },
+      availabilityDescription: {
+        ready: "媒体已归档，可用于后续回看。",
+        missing: "原始媒体已缺失，无法播放，但文本归档仍然保留。",
+        permission_required: "需要重新授权归档目录后才能访问媒体文件。",
+        write_failed: "媒体归档失败，本记录目前只保留文本与整理结果。",
+        not_archived: "当前记录未保留原始媒体，仅保存文本归档与相关元信息。"
+      }
     },
     confirm: {
       defaultTitle: "确认操作",
@@ -731,6 +839,12 @@ export const messages: Record<AppLanguage, Dictionary> = {
       deleteRecord: "Delete record",
       title: "Title",
       transcriptMetadata: "Transcript Metadata",
+      mediaAsset: {
+        title: "Media Asset",
+        storageMode: "Storage Mode",
+        availability: "Media Status",
+        fileSize: "File Size"
+      },
       fileName: "File Name",
       fileType: "File Type",
       duration: "Duration",
@@ -763,7 +877,22 @@ export const messages: Record<AppLanguage, Dictionary> = {
         upload: "Upload File",
         link: "Paste link",
         text: "Paste text",
-        manual: "Manual entry"
+        manual: "Start Blank"
+      },
+      modeHelpers: {
+        upload: "Upload a single media file and continue editing once the transcript is ready.",
+        paste_text: "Paste existing text, subtitles, or notes and move straight into organization.",
+        blank: "Start from an empty note when you only have a lead and want to fill in the source text later.",
+        paste_link:
+          "Paste a link and optionally try a lightweight content import. AI will still organize the text that ends up in this form.",
+        browser_import: "Use the browser extension to bring page context back into the archiver, then review and complete the text."
+      },
+      createRecordCta: {
+        upload: "Create record",
+        paste_text: "Create record",
+        blank: "Create record",
+        paste_link: "Create record",
+        browser_import: "Create record"
       },
       uploadTitle: "Upload Video or Audio",
       uploadDescription: "Upload one media file, transcribe it, then review the text in the existing Original Content editor.",
@@ -778,6 +907,16 @@ export const messages: Record<AppLanguage, Dictionary> = {
       uploadWorkflowLabelTranscribe: "Transcribe",
       uploadWorkflowLabelProcess: "Processing",
       uploadWorkflowVideoHelper: "Processing includes audio extraction and transcription.",
+      archiveModePlaceholderTitle: "Local Archive Directory",
+      archiveModePlaceholderDescription: "A later version will let you save original media into a local archive directory and reopen it from the detail view.",
+      archiveModePlaceholderAction: "Coming Soon",
+      failureStagePrefix: "Failure Stage",
+      failureStageLabel: {
+        upload: "Upload",
+        preprocessing: "Preprocessing",
+        transcription: "Transcription",
+        unknown: "Unknown stage"
+      },
       uploadModelUsed: "Transcription Model",
       uploadModelAttempts: "Transcription Model Attempts",
       uploadModelFallback: "Auto fallback",
@@ -820,7 +959,12 @@ export const messages: Record<AppLanguage, Dictionary> = {
       originalUrl: "Original URL",
       content: "Source content / subtitles / notes",
       manualContent: "Source content (optional for now)",
+      blankContentLabel: "Starting notes",
+      pasteTextContentLabel: "Pasted text",
       contentPlaceholder: "AI only uses the text here. Even in link mode, it helps to paste notes, subtitles, or source text.",
+      blankContentPlaceholder: "Start from a blank note and capture the clues, fragments, or questions you already have.",
+      pasteTextContentPlaceholder: "Paste existing text, subtitles, excerpts, or notes. AI will organize what you provide here.",
+      linkContentPlaceholder: "Add body text, subtitles, or notes here. In link mode, AI still depends mainly on this text.",
       folder: "Folder",
       tags: "Tags (comma separated, optional)",
       tagsPlaceholder: (sample) => (sample ? `For example: ${sample}` : "For example: career, growth"),
@@ -842,6 +986,16 @@ export const messages: Record<AppLanguage, Dictionary> = {
         trackCountLabel: (count) => `${count} subtitle track(s) detected`,
         cookieUsed: "Bilibili cookie attached",
         cookieMissing: "Anonymous request"
+      },
+      linkImport: {
+        title: "Link Assist Import",
+        description:
+          "The app will try to extract reusable text from the link. If the result is incomplete, you can keep the link and add body text manually.",
+        trigger: "Try Importing Link Content",
+        partialHelper:
+          "Only part of the text was recovered. For Xiaohongshu article or image-post links, it is best to add more body text, captions, or notes before AI.",
+        failedHelper:
+          "The link could not be turned into reusable body text automatically, but you can still fill in the source text manually and create the record."
       },
       browserImport: {
         trigger: "Browser import (Beta)",
@@ -865,6 +1019,26 @@ export const messages: Record<AppLanguage, Dictionary> = {
       tagNamePlaceholder: "Enter a tag name",
       nameRequired: "Name is required",
       nameTooLong: "Keep the name within 40 characters"
+    },
+    mediaAsset: {
+      storageMode: {
+        none: "Not archived",
+        local_archive_dir: "Local archive directory"
+      },
+      availability: {
+        ready: "Media available",
+        missing: "Media missing",
+        permission_required: "Authorization required",
+        write_failed: "Archive failed",
+        not_archived: "Original media not archived"
+      },
+      availabilityDescription: {
+        ready: "The media has been archived and can support future review workflows.",
+        missing: "The original media is missing, so playback is unavailable, but the text archive is still intact.",
+        permission_required: "Re-authorize the archive directory before this media can be accessed.",
+        write_failed: "Media archiving failed, so only the text archive is currently retained.",
+        not_archived: "This record currently keeps text and metadata only, without the original media."
+      }
     },
     confirm: {
       defaultTitle: "Confirm action",
@@ -1080,10 +1254,20 @@ const importIssueMessages: Record<AppLanguage, Record<ImportIssueCode, string>> 
     VISIBLE_CAPTION_ONLY: "当前仅拿到播放器里可见的一句字幕，尚不能视为完整正文。",
     TRANSCRIPT_NOT_FOUND: "当前页面未找到可导入的完整转写或字幕正文。",
     TRANSCRIPT_TOO_SHORT: "当前导入内容过短，可能只有单句字幕或零碎片段，建议继续补充。",
+    SECURITY_BLOCKED: "该链接被安全策略阻止，系统不会直接请求此目标；你仍可保留链接并手动补充内容。",
+    TOO_MANY_REDIRECTS: "该链接跳转次数过多，当前已停止导入；你仍可继续创建记录并手动补充。",
+    UNSUPPORTED_CONTENT_TYPE: "该链接返回的不是可提取正文的网页内容，建议手动补充正文或笔记。",
+    CONTENT_TOO_LARGE: "该页面内容过大，当前已停止自动提取；你仍可保留链接并手动补充。",
+    EXTRACTION_EMPTY: "页面已获取，但未提取到可复用正文。",
+    META_ONLY: "当前仅提取到标题或摘要，建议继续补充正文。",
+    OCR_NOT_ATTEMPTED: "页面中可能还有图片承载的正文内容，但本次未尝试图片文字识别。",
+    OCR_PROVIDER_UNAVAILABLE: "页面可能依赖图片承载正文，但当前服务端未配置图片 OCR 能力。",
+    OCR_NO_TEXT_DETECTED: "已尝试识别页面图片文字，但未提取到可复用内容。",
     MANUAL_COMPLETION_REQUIRED: "当前导入内容仍不足，建议继续补充正文 / 字幕 / 笔记。",
     COOKIE_REQUIRED_POSSIBLE:
       "当前未能完整提取内容，可能受平台访问限制影响；你仍可继续创建记录并手动补充。",
     MULTIPLE_TRACKS_NEED_SELECTION: "检测到多条字幕轨，可选择导入其中一条。",
+    FETCH_FAILED: "远程页面抓取失败，但不会阻止你先创建记录。",
     NETWORK_ERROR: "远程导入流程发生网络问题，但不会阻止你先创建记录。",
     UNKNOWN_ERROR: "导入流程出现异常，但你仍可继续创建记录并手动补充内容。"
   },
@@ -1111,11 +1295,29 @@ const importIssueMessages: Record<AppLanguage, Record<ImportIssueCode, string>> 
     TRANSCRIPT_NOT_FOUND: "No complete transcript or subtitle body was found on the page.",
     TRANSCRIPT_TOO_SHORT:
       "The imported text is too short and may only be a single subtitle cue or fragment. Adding more source text is recommended.",
+    SECURITY_BLOCKED:
+      "This link was blocked by the import security policy. You can still keep the link and add the text manually.",
+    TOO_MANY_REDIRECTS:
+      "The link redirected too many times, so the import was stopped. You can still create the record and complete it manually.",
+    UNSUPPORTED_CONTENT_TYPE:
+      "The link did not return a readable web page for text extraction. Adding the source text manually is recommended.",
+    CONTENT_TOO_LARGE:
+      "The page was too large to import safely. You can still keep the link and complete the record manually.",
+    EXTRACTION_EMPTY: "The page was fetched, but no reusable body text was extracted.",
+    META_ONLY:
+      "Only the title or summary could be imported from the page. Adding the main body text manually is recommended.",
+    OCR_NOT_ATTEMPTED:
+      "The page may still rely on image-based body text, but image OCR was not attempted for this import.",
+    OCR_PROVIDER_UNAVAILABLE:
+      "The page may rely on image-based body text, but image OCR is not configured on this server.",
+    OCR_NO_TEXT_DETECTED:
+      "Image OCR was attempted for this page, but no reusable text was detected.",
     MANUAL_COMPLETION_REQUIRED:
       "The imported content is still insufficient. Please add subtitles, notes, or source text manually.",
     COOKIE_REQUIRED_POSSIBLE:
       "The content could not be fully imported and platform access restrictions may be involved. You can still create the record and complete it manually.",
     MULTIPLE_TRACKS_NEED_SELECTION: "Multiple subtitle tracks were detected. You can choose which one to import.",
+    FETCH_FAILED: "Fetching the remote page failed, but you can still create the record.",
     NETWORK_ERROR: "The remote import flow hit a network problem, but you can still create the record.",
     UNKNOWN_ERROR: "Something went wrong during import, but you can still create the record and fill in the content manually."
   }
@@ -1129,6 +1331,26 @@ const importUiMessages = {
     partial: "已导入部分内容，建议创建后补充正文再整理。",
     needsUserInput: "已识别链接或来源，但正文仍不足。可继续创建，并补充正文 / 字幕 / 笔记。",
     failedButCreatable: "自动导入流程未完成，但不会阻止你先创建记录。",
+    htmlOnlyReady: "已提取网页正文，可继续创建并整理。",
+    htmlOnlyNoOcr: "已提取网页文本，但图片中的文字尚未识别（本次未尝试 OCR）。",
+    htmlOnlyProviderUnavailable: "已提取网页文本，但图片中的文字尚未识别（当前未配置 OCR 能力）。",
+    htmlAndOcr: "已提取网页文本，并补充识别了部分图片文字。",
+    metaOnly: "仅提取到标题或摘要，建议补充正文。",
+    insufficient: "未提取到足够可整理内容，请手动补充正文。",
+    ocrNotAttemptedHint: (count: number) => `检测到 ${count} 张可能承载正文的图片，但本次未尝试 OCR。`,
+    ocrProviderUnavailableHint: (count: number) => `检测到 ${count} 张可能承载正文的图片，但当前服务端未配置 OCR 能力。`,
+    ocrNotAttemptedCappedHint: (found: number, selected: number) =>
+      `检测到 ${found} 张图片信号，当前仅选取前 ${selected} 张作为正文候选图，但本次未尝试 OCR。`,
+    ocrProviderUnavailableCappedHint: (found: number, selected: number) =>
+      `检测到 ${found} 张图片信号，当前仅选取前 ${selected} 张作为正文候选图，但当前服务端未配置 OCR 能力。`,
+    ocrNotAttemptedFilteredHint: (found: number, selected: number) =>
+      `检测到 ${found} 张图片信号，但当前仅有 ${selected} 张符合正文候选条件，本次未尝试 OCR。`,
+    ocrProviderUnavailableFilteredHint: (found: number, selected: number) =>
+      `检测到 ${found} 张图片信号，但当前仅有 ${selected} 张符合正文候选条件，且当前服务端未配置 OCR 能力。`,
+    ocrPartialSignalsHint: (found: number, selected: number) =>
+      `页面里检测到 ${found} 张图片信号，当前仅基于其中 ${selected} 张正文候选图判断覆盖度。`,
+    ocrSuccessfulHint: (succeeded: number, detected: number) => `已识别 ${succeeded}/${detected} 张正文图片中的文字，可继续补充完善。`,
+    ocrNoTextHint: (attempted: number) => `已尝试识别 ${attempted} 张图片，但未提取到可用文字。`,
     multipleTracksAvailable: "已检测到多条字幕轨，可继续使用当前结果，也可切换其他轨道。",
     selectTrackRecommended: "当前检测到多条字幕轨，建议先选择一条再创建记录。",
     selectTrackPlaceholder: "请选择字幕轨",
@@ -1147,6 +1369,30 @@ const importUiMessages = {
     needsUserInput:
       "The source or link was recognized, but the body text is still insufficient. You can create the record and add subtitles, notes, or source text manually.",
     failedButCreatable: "The automatic import flow did not complete, but you can still create the record.",
+    htmlOnlyReady: "Web page text was extracted and is ready to review.",
+    htmlOnlyNoOcr: "Web page text was extracted, but text inside the images is still missing because OCR was not attempted for this import.",
+    htmlOnlyProviderUnavailable: "Web page text was extracted, but text inside the images is still missing because OCR is not configured on this server.",
+    htmlAndOcr: "Web page text was extracted and some image text was added through OCR.",
+    metaOnly: "Only the title or excerpt was extracted. Add the main body text before organizing it.",
+    insufficient: "Not enough reusable text was extracted. Please add the body text manually.",
+    ocrNotAttemptedHint: (count: number) =>
+      `${count} image(s) may carry body text, but OCR was not attempted for this import.`,
+    ocrProviderUnavailableHint: (count: number) =>
+      `${count} image(s) may carry body text, but OCR is not configured on this server.`,
+    ocrNotAttemptedCappedHint: (found: number, selected: number) =>
+      `${found} image signals were detected, but only the first ${selected} are currently selected as body-image candidates, and OCR was not attempted.`,
+    ocrProviderUnavailableCappedHint: (found: number, selected: number) =>
+      `${found} image signals were detected, but only the first ${selected} are currently selected as body-image candidates, and OCR is not configured on this server.`,
+    ocrNotAttemptedFilteredHint: (found: number, selected: number) =>
+      `${found} image signals were detected, but only ${selected} currently match the body-image filter, and OCR was not attempted.`,
+    ocrProviderUnavailableFilteredHint: (found: number, selected: number) =>
+      `${found} image signals were detected, but only ${selected} currently match the body-image filter, and OCR is not configured on this server.`,
+    ocrPartialSignalsHint: (found: number, selected: number) =>
+      `${found} image signals were detected on the page, and the current coverage estimate only uses ${selected} body-image candidates.`,
+    ocrSuccessfulHint: (succeeded: number, detected: number) =>
+      `OCR recognized text from ${succeeded}/${detected} body image(s). You can still refine the content if needed.`,
+    ocrNoTextHint: (attempted: number) =>
+      `OCR checked ${attempted} image(s), but no reusable text was detected.`,
     multipleTracksAvailable: "Multiple subtitle tracks were found. You can keep the current result or switch to another track.",
     selectTrackRecommended: "Multiple subtitle tracks were found. Choosing one before creating is recommended.",
     selectTrackPlaceholder: "Choose a subtitle track",
@@ -1166,6 +1412,21 @@ const importUiMessages = {
     partial: string;
     needsUserInput: string;
     failedButCreatable: string;
+    htmlOnlyReady: string;
+    htmlOnlyNoOcr: string;
+    htmlOnlyProviderUnavailable: string;
+    htmlAndOcr: string;
+    metaOnly: string;
+    insufficient: string;
+    ocrNotAttemptedHint: (count: number) => string;
+    ocrProviderUnavailableHint: (count: number) => string;
+    ocrNotAttemptedCappedHint: (found: number, selected: number) => string;
+    ocrProviderUnavailableCappedHint: (found: number, selected: number) => string;
+    ocrNotAttemptedFilteredHint: (found: number, selected: number) => string;
+    ocrProviderUnavailableFilteredHint: (found: number, selected: number) => string;
+    ocrPartialSignalsHint: (found: number, selected: number) => string;
+    ocrSuccessfulHint: (succeeded: number, detected: number) => string;
+    ocrNoTextHint: (attempted: number) => string;
     multipleTracksAvailable: string;
     selectTrackRecommended: string;
     selectTrackPlaceholder: string;

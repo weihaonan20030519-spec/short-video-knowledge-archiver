@@ -1,5 +1,11 @@
 import type { AppLanguage, InputMethod, SourcePlatform } from "../../types/domain";
-import type { BilibiliImportProbeData, BilibiliImportResponse } from "../../types/api";
+import type {
+  ArticleImportData,
+  ArticleImportExtractionReport,
+  ArticleImportResponse,
+  BilibiliImportProbeData,
+  BilibiliImportResponse
+} from "../../types/api";
 import { detectPlatform, extractLinkTitle } from "../../lib/platform";
 import { getImportIssueMessage } from "../../lib/i18n";
 import {
@@ -7,6 +13,8 @@ import {
   readBrowserContextImportSession,
   startBrowserContextImportSession
 } from "./browserContextImportService";
+import { importArticleLink } from "./articleLinkImportService";
+import { formatArticleImportedContent } from "./articleImportFormatter";
 import { importBilibiliLink } from "./bilibiliLinkImportService";
 import {
   assessContentCompleteness,
@@ -16,6 +24,7 @@ import {
 import type {
   ImportFlowState,
   ImportIssueCode,
+  ImportContentCompleteness,
   ImportPlatform,
   ImportResult,
   ImportSession,
@@ -72,6 +81,18 @@ function normalizeImportPlatform(platform: ImportPlatform): SourcePlatform {
   }
 
   if (platform === "other") {
+    return "other";
+  }
+
+  return "unknown";
+}
+
+function toImportPlatform(platform: SourcePlatform): ImportPlatform {
+  if (platform === "bilibili") {
+    return "bilibili";
+  }
+
+  if (platform === "other" || platform === "xiaohongshu" || platform === "tiktok") {
     return "other";
   }
 
@@ -152,6 +173,137 @@ function mapProbeTracks(probe: BilibiliImportProbeData | null | undefined): Impo
     isAiSubtitle: track.isAiSubtitle,
     subtitleUrl: track.subtitleUrl
   }));
+}
+
+function mapArticleWarnings(
+  warnings: ArticleImportData["warnings"],
+  language: AppLanguage
+): ImportWarning[] {
+  return warnings.map((warning) => ({
+    code: warning.code,
+    message: warning.message || getImportIssueMessage(warning.code, language)
+  }));
+}
+
+function mapCoverageToContentCompleteness(
+  report: ArticleImportExtractionReport,
+  detectedContent: string | null
+): ImportContentCompleteness {
+  const rawCompleteness = assessContentCompleteness(detectedContent);
+
+  if (report.coverageLevel === "full") {
+    return rawCompleteness === "empty" ? "partial" : "full";
+  }
+
+  if (report.coverageLevel === "partial" || report.coverageLevel === "limited") {
+    return rawCompleteness === "empty" ? "partial" : "partial";
+  }
+
+  return "empty";
+}
+
+function deriveArticleOutcome(
+  data: ArticleImportData,
+  contentCompleteness: ImportResult["contentCompleteness"]
+): ImportResult["outcome"] {
+  const warningCodes = new Set(data.warnings.map((warning) => warning.code));
+
+  if (
+    warningCodes.has("SECURITY_BLOCKED") ||
+    warningCodes.has("TOO_MANY_REDIRECTS") ||
+    warningCodes.has("UNSUPPORTED_CONTENT_TYPE") ||
+    warningCodes.has("FETCH_FAILED")
+  ) {
+    return "failed_but_creatable";
+  }
+
+  if (data.extractionReport.coverageLevel === "full") {
+    return "complete";
+  }
+
+  if (data.extractionReport.coverageLevel === "partial") {
+    return "partial";
+  }
+
+  if (contentCompleteness === "partial") {
+    return "partial";
+  }
+
+  return data.fetchSucceeded ? "needs_user_input" : "failed_but_creatable";
+}
+
+function mapLinkExtractionReport(report: ArticleImportExtractionReport): ImportResult["linkExtractionReport"] {
+  return {
+    extractionSources: report.extractionSources,
+    hasHtmlText: report.hasHtmlText,
+    hasImageOcrText: report.hasImageOcrText,
+    htmlTextLength: report.htmlTextLength,
+    imageSignalsFound: report.imageSignalsFound,
+    candidateImagesSelected: report.candidateImagesSelected,
+    ocrAttemptLimit: report.ocrAttemptLimit,
+    candidateSelectionReasons: report.candidateSelectionReasons,
+    imageOcrAttempted: report.imageOcrAttempted,
+    imageOcrSucceeded: report.imageOcrSucceeded,
+    imageOcrTextLength: report.imageOcrTextLength,
+    coverageLevel: report.coverageLevel,
+    ocrStatus: report.ocrStatus
+  };
+}
+
+function mapArticleResponse(
+  response: ArticleImportResponse,
+  requestedUrl: string,
+  language: AppLanguage
+): ImportResult {
+  if (!response.success) {
+    if (response.error.code === "INVALID_URL") {
+      return createGenericLinkImportResult(requestedUrl, toImportPlatform(detectPlatform(requestedUrl)), language);
+    }
+
+    return {
+      source: "link_generic",
+      platform: toImportPlatform(detectPlatform(requestedUrl)),
+      outcome: "failed_but_creatable",
+      originalUrl: requestedUrl,
+      detectedTitle: extractLinkTitle(requestedUrl) || null,
+      detectedContent: null,
+      contentCompleteness: "empty",
+      availableTracks: [],
+      selectedTrackId: null,
+      warnings: [
+        {
+          code: "UNKNOWN_ERROR",
+          message: getImportIssueMessage("UNKNOWN_ERROR", language)
+        }
+      ],
+      canCreateRecord: true,
+      shouldPromptManualInput: true
+    };
+  }
+
+  const detectedContent = formatArticleImportedContent(response.data);
+  const contentCompleteness = mapCoverageToContentCompleteness(response.data.extractionReport, detectedContent);
+  const warnings = mapArticleWarnings(response.data.warnings, language);
+  const outcome = deriveArticleOutcome(response.data, contentCompleteness);
+
+  return {
+    source: "link_generic",
+    platform:
+      response.data.platform === "unknown"
+        ? toImportPlatform(detectPlatform(requestedUrl))
+        : toImportPlatform(response.data.platform),
+    outcome,
+    originalUrl: response.data.originalUrl || requestedUrl,
+    detectedTitle: response.data.title?.trim() || extractLinkTitle(requestedUrl) || null,
+    detectedContent,
+    contentCompleteness,
+    availableTracks: [],
+    selectedTrackId: null,
+    warnings,
+    canCreateRecord: true,
+    shouldPromptManualInput: outcome !== "complete",
+    linkExtractionReport: mapLinkExtractionReport(response.data.extractionReport)
+  };
 }
 
 function mapBilibiliResponse(
@@ -301,7 +453,33 @@ export async function resolveImport(options: ResolveImportOptions): Promise<Impo
 
   const platform = detectPlatform(trimmedUrl);
   if (platform !== "bilibili") {
-    return createImportSession(createGenericLinkImportResult(trimmedUrl, platform === "other" ? "other" : "unknown", options.appLanguage));
+    try {
+      const response = await importArticleLink(trimmedUrl);
+      return createImportSession(mapArticleResponse(response, trimmedUrl, options.appLanguage));
+    } catch {
+      return createImportSession(
+        {
+          source: "link_generic",
+          platform: toImportPlatform(platform),
+          outcome: "failed_but_creatable",
+          originalUrl: trimmedUrl,
+          detectedTitle: extractLinkTitle(trimmedUrl) || null,
+          detectedContent: null,
+          contentCompleteness: "empty",
+          availableTracks: [],
+          selectedTrackId: null,
+        warnings: [
+          {
+              code: "FETCH_FAILED",
+              message: getImportIssueMessage("FETCH_FAILED", options.appLanguage)
+          }
+        ],
+        canCreateRecord: true,
+          shouldPromptManualInput: true
+        },
+        "error_but_can_continue"
+      );
+    }
   }
 
   try {
@@ -320,6 +498,7 @@ export function buildRecordImportSnapshot(importResult: ImportResult | null): Re
     detectedContent: importResult?.detectedContent || null,
     importSummary: importResult
       ? {
+          source: importResult.source,
           outcome: importResult.outcome,
           contentCompleteness: importResult.contentCompleteness
         }

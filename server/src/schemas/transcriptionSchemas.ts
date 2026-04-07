@@ -1,6 +1,21 @@
 import { z } from "zod";
 
 export const transcriptionSourceTypeSchema = z.enum(["video", "audio"]);
+export const transcriptionPhaseSchema = z.enum([
+  "uploaded",
+  "preprocessing",
+  "transcribing",
+  "transcript_ready",
+  "ai_processing",
+  "completed",
+  "failed"
+]);
+export const transcriptionFailureStageSchema = z.enum([
+  "upload",
+  "preprocessing",
+  "transcription",
+  "unknown"
+]);
 
 export const transcriptionStatusSchema = z.enum([
   "idle",
@@ -34,6 +49,7 @@ export const transcriptFileMetaSchema = z.object({
 });
 
 export const transcriptionResponseSchema = z.object({
+  phase: transcriptionPhaseSchema,
   sourceType: transcriptionSourceTypeSchema,
   suggestedTitle: z.string().min(1),
   transcriptText: z.string().min(1),
@@ -58,6 +74,8 @@ export const transcriptionProviderOutputSchema = z.object({
 });
 
 export type TranscriptionSourceType = z.infer<typeof transcriptionSourceTypeSchema>;
+export type TranscriptionPhase = z.infer<typeof transcriptionPhaseSchema>;
+export type TranscriptionFailureStage = z.infer<typeof transcriptionFailureStageSchema>;
 export type TranscriptionStatus = z.infer<typeof transcriptionStatusSchema>;
 export type TranscriptSegment = z.infer<typeof transcriptSegmentSchema>;
 export type TranscriptTimestamp = z.infer<typeof transcriptTimestampSchema>;

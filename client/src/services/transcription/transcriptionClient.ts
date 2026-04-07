@@ -29,6 +29,10 @@ function parseResponseText(text: string, status: number): TranscriptionResponse 
           : status === 429
             ? "Transcription quota exceeded"
             : "Internal server error"
+    },
+    meta: {
+      phase: "failed",
+      failureStage: status === 504 || status === 429 ? "transcription" : "unknown"
     }
   };
 }
@@ -86,6 +90,10 @@ export async function transcribeFile(
         error: {
           code: "INTERNAL_ERROR",
           message: "Network error"
+        },
+        meta: {
+          phase: "failed",
+          failureStage: "upload"
         }
       });
     };
@@ -97,6 +105,10 @@ export async function transcribeFile(
         error: {
           code: "INTERNAL_ERROR",
           message: "Request aborted"
+        },
+        meta: {
+          phase: "failed",
+          failureStage: "upload"
         }
       });
     };

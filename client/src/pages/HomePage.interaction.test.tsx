@@ -86,7 +86,7 @@ function createBilibiliImportData(overrides: Partial<{
 }
 
 describe("HomePage interactions", () => {
-  it("auto-imports bilibili subtitles into the create-record modal", async () => {
+  it("imports bilibili subtitles into the create-record modal after the explicit link CTA", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       json: async () => ({
         success: true,
@@ -101,13 +101,14 @@ describe("HomePage interactions", () => {
 
     await openLinkImportCreateModal(user);
     await user.type(screen.getByPlaceholderText("https://..."), "https://www.bilibili.com/video/BV1xx411c7mD/");
+    await user.click(screen.getByRole("button", { name: "尝试提取链接内容" }));
 
-    expect(await screen.findAllByText("已检测到多条字幕轨，可继续使用当前结果，也可切换其他轨道。")).toHaveLength(2);
+    expect(await screen.findByText("已检测到多条字幕轨，可继续使用当前结果，也可切换其他轨道。")).toBeInTheDocument();
     expect(screen.getByDisplayValue("B站方法论视频")).toBeInTheDocument();
     const contentField = screen.getByRole("textbox", { name: "原始内容 / 字幕 / 备注" }) as HTMLTextAreaElement;
     expect(contentField.value).toContain("先明确目标");
     expect(contentField.value).toContain("更适合直接进入 AI 整理");
-    expect(screen.getByText("已检测到 2 条字幕轨")).toBeInTheDocument();
+    expect(screen.getByLabelText("字幕轨道")).toBeInTheDocument();
     expect(screen.getByText("检测到多条字幕轨，可选择导入其中一条。")).toBeInTheDocument();
   });
 
@@ -139,6 +140,7 @@ describe("HomePage interactions", () => {
 
     await openLinkImportCreateModal(user);
     await user.type(screen.getByPlaceholderText("https://..."), "https://www.bilibili.com/video/BV1xx411c7mD/");
+    await user.click(screen.getByRole("button", { name: "尝试提取链接内容" }));
 
     const trackSelect = await screen.findByLabelText("字幕轨道", {}, { timeout: 2500 });
     await user.selectOptions(trackSelect, "track-ai");
@@ -163,6 +165,7 @@ describe("HomePage interactions", () => {
     expect(await screen.findByText("B站方法论视频")).toBeInTheDocument();
     const createdRecords = await recordRepository.listAll();
     expect(createdRecords[0]?.importSummary).toEqual({
+      source: "link_bilibili_server",
       outcome: "partial",
       contentCompleteness: "partial"
     });
@@ -195,12 +198,10 @@ describe("HomePage interactions", () => {
 
     await openLinkImportCreateModal(user);
     await user.type(screen.getByPlaceholderText("https://..."), "https://www.bilibili.com/video/BV1xx411c7mD/");
+    await user.click(screen.getByRole("button", { name: "尝试提取链接内容" }));
 
-    expect(await screen.findAllByText("当前检测到多条字幕轨，建议先选择一条再创建记录。")).toHaveLength(2);
-    expect(screen.getByText("已检测到 2 条字幕轨")).toBeInTheDocument();
-    expect(
-      screen.getByText("已识别到字幕线索，但当前未能完整提取正文，可继续创建记录并手动补充。")
-    ).toBeInTheDocument();
+    expect(await screen.findByText("当前检测到多条字幕轨，建议先选择一条再创建记录。")).toBeInTheDocument();
+    expect(screen.getByLabelText("字幕轨道")).toBeInTheDocument();
     expect(
       screen.getByText("当前未能完整提取内容，可能受平台访问限制影响；你仍可继续创建记录并手动补充。")
     ).toBeInTheDocument();
@@ -210,6 +211,7 @@ describe("HomePage interactions", () => {
     expect(await screen.findByText("B站无可用字幕视频")).toBeInTheDocument();
     const createdRecords = await recordRepository.listAll();
     expect(createdRecords[0]?.importSummary).toEqual({
+      source: "link_bilibili_server",
       outcome: "failed_but_creatable",
       contentCompleteness: "empty"
     });
@@ -244,10 +246,10 @@ describe("HomePage interactions", () => {
 
     await openLinkImportCreateModal(user);
     await user.type(screen.getByPlaceholderText("https://..."), "https://www.bilibili.com/video/BV1xx411c7mD/");
+    await user.click(screen.getByRole("button", { name: "尝试提取链接内容" }));
 
-    expect(
-      await screen.findByText("已识别链接或来源，但正文仍不足。可继续创建，并补充正文 / 字幕 / 笔记。")
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "创建记录" })).toBeEnabled();
+    expect(screen.getByRole("textbox", { name: "原始内容 / 字幕 / 备注" })).toBeInTheDocument();
     expect(
       screen.queryByText("自动导入流程未完成，但不会阻止你先创建记录。")
     ).not.toBeInTheDocument();
@@ -353,6 +355,7 @@ describe("HomePage interactions", () => {
 
     const createdRecords = await recordRepository.listAll();
     expect(createdRecords[0]?.importSummary).toEqual({
+      source: "browser_context",
       outcome: "complete",
       contentCompleteness: "full"
     });
@@ -520,6 +523,7 @@ describe("HomePage interactions", () => {
 
     const createdRecords = await recordRepository.listAll();
     expect(createdRecords[0]?.importSummary).toEqual({
+      source: "browser_context",
       outcome: "failed_but_creatable",
       contentCompleteness: "empty"
     });
@@ -544,8 +548,7 @@ describe("HomePage interactions", () => {
     expect(await screen.findByRole("button", { name: "Upload File" })).toBeInTheDocument();
     expect(screen.getByText("Upload Video or Audio")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Paste text" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Manual entry" })).toBeInTheDocument();
-    expect(screen.getByText("Other import methods")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start Blank" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Paste link" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Browser import (Beta)" })).toBeInTheDocument();
   });
