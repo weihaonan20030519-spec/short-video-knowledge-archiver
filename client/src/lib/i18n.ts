@@ -274,6 +274,7 @@ type Dictionary = {
       description: string;
       trigger: string;
       partialHelper: string;
+      insufficientHelper: string;
       failedHelper: string;
     };
     browserImport: {
@@ -612,8 +613,9 @@ export const messages: Record<AppLanguage, Dictionary> = {
         title: "链接辅助导入",
         description: "系统会尽力从链接中提取可用于整理的文本；如果提取不足，仍可保留链接并手动补正文。",
         trigger: "尝试提取链接内容",
-        partialHelper: "已导入部分文本。若是小红书文章或图文，建议再补充正文、字幕或笔记后再整理。",
-        failedHelper: "未能自动提取可用正文，但不会阻止你继续手动填写并创建记录。"
+        partialHelper: "当前只拿到部分可整理文本，建议在下方继续补充原始内容。",
+        insufficientHelper: "当前只拿到标题或摘要，建议在下方补充正文。",
+        failedHelper: "未能自动提取可用正文，但仍可在下方手动补充后继续创建记录。"
       },
       browserImport: {
         trigger: "浏览器导入（Beta）",
@@ -992,10 +994,10 @@ export const messages: Record<AppLanguage, Dictionary> = {
         description:
           "The app will try to extract reusable text from the link. If the result is incomplete, you can keep the link and add body text manually.",
         trigger: "Try Importing Link Content",
-        partialHelper:
-          "Only part of the text was recovered. For Xiaohongshu article or image-post links, it is best to add more body text, captions, or notes before AI.",
+        partialHelper: "Only part of the reusable text was imported. Please continue adding the source text below.",
+        insufficientHelper: "Only the title or excerpt was imported. Please add the main body text below.",
         failedHelper:
-          "The link could not be turned into reusable body text automatically, but you can still fill in the source text manually and create the record."
+          "The link could not be turned into reusable body text automatically, but you can still add it manually below and create the record."
       },
       browserImport: {
         trigger: "Browser import (Beta)",
@@ -1328,28 +1330,31 @@ const importUiMessages = {
     detectingPlatform: "正在识别导入来源…",
     fetchingRemoteContent: "正在尝试获取可导入内容…",
     complete: "已获取足够内容，创建后可直接进入整理。",
-    partial: "已导入部分内容，建议创建后补充正文再整理。",
-    needsUserInput: "已识别链接或来源，但正文仍不足。可继续创建，并补充正文 / 字幕 / 笔记。",
+    partial: "已导入部分内容，建议先补充正文再整理。",
+    needsUserInput: "已识别链接或来源，但正文仍不足。可继续创建，并在下方补充正文 / 字幕 / 笔记。",
     failedButCreatable: "自动导入流程未完成，但不会阻止你先创建记录。",
-    htmlOnlyReady: "已提取网页正文，可继续创建并整理。",
+    htmlOnlyReady: "已提取网页正文，可继续整理。",
     htmlOnlyNoOcr: "已提取网页文本，但图片中的文字尚未识别（本次未尝试 OCR）。",
     htmlOnlyProviderUnavailable: "已提取网页文本，但图片中的文字尚未识别（当前未配置 OCR 能力）。",
     htmlAndOcr: "已提取网页文本，并补充识别了部分图片文字。",
-    metaOnly: "仅提取到标题或摘要，建议补充正文。",
-    insufficient: "未提取到足够可整理内容，请手动补充正文。",
-    ocrNotAttemptedHint: (count: number) => `检测到 ${count} 张可能承载正文的图片，但本次未尝试 OCR。`,
-    ocrProviderUnavailableHint: (count: number) => `检测到 ${count} 张可能承载正文的图片，但当前服务端未配置 OCR 能力。`,
+    metaOnly: "仅提取到标题或摘要，请补充正文。",
+    insufficient: "未提取到足够可整理内容，请在下方补充正文。",
+    partialHelper: "当前只拿到部分可整理文本，建议在下方继续补充原始内容。",
+    insufficientHelper: "当前只拿到标题或摘要，建议在下方补充正文。",
+    failedHelper: "未能自动提取可用正文，但仍可在下方手动补充后继续创建记录。",
+    ocrNotAttemptedHint: (count: number) => `检测到 ${count} 张可能承载正文的图片，但图片中的文字本次未尝试识别。`,
+    ocrProviderUnavailableHint: (count: number) => `检测到 ${count} 张可能承载正文的图片，但图片中的文字尚未识别（当前未配置 OCR 能力）。`,
     ocrNotAttemptedCappedHint: (found: number, selected: number) =>
-      `检测到 ${found} 张图片信号，当前仅选取前 ${selected} 张作为正文候选图，但本次未尝试 OCR。`,
+      `检测到 ${found} 张图片信号，当前仅选取前 ${selected} 张作为正文候选图，但图片中的文字本次未尝试识别。`,
     ocrProviderUnavailableCappedHint: (found: number, selected: number) =>
-      `检测到 ${found} 张图片信号，当前仅选取前 ${selected} 张作为正文候选图，但当前服务端未配置 OCR 能力。`,
+      `检测到 ${found} 张图片信号，当前仅选取前 ${selected} 张作为正文候选图，但图片中的文字尚未识别（当前未配置 OCR 能力）。`,
     ocrNotAttemptedFilteredHint: (found: number, selected: number) =>
-      `检测到 ${found} 张图片信号，但当前仅有 ${selected} 张符合正文候选条件，本次未尝试 OCR。`,
+      `检测到 ${found} 张图片信号，但当前仅有 ${selected} 张符合正文候选条件，本次未尝试识别。`,
     ocrProviderUnavailableFilteredHint: (found: number, selected: number) =>
       `检测到 ${found} 张图片信号，但当前仅有 ${selected} 张符合正文候选条件，且当前服务端未配置 OCR 能力。`,
     ocrPartialSignalsHint: (found: number, selected: number) =>
       `页面里检测到 ${found} 张图片信号，当前仅基于其中 ${selected} 张正文候选图判断覆盖度。`,
-    ocrSuccessfulHint: (succeeded: number, detected: number) => `已识别 ${succeeded}/${detected} 张正文图片中的文字，可继续补充完善。`,
+    ocrSuccessfulHint: (succeeded: number, detected: number) => `已识别 ${succeeded}/${detected} 张正文图片中的文字。`,
     ocrNoTextHint: (attempted: number) => `已尝试识别 ${attempted} 张图片，但未提取到可用文字。`,
     multipleTracksAvailable: "已检测到多条字幕轨，可继续使用当前结果，也可切换其他轨道。",
     selectTrackRecommended: "当前检测到多条字幕轨，建议先选择一条再创建记录。",
@@ -1365,24 +1370,28 @@ const importUiMessages = {
     detectingPlatform: "Detecting the import source…",
     fetchingRemoteContent: "Trying to fetch importable content…",
     complete: "Enough content was imported. You can create the record and go straight to AI organization.",
-    partial: "Part of the content was imported. It is best to add more source text after creating the record.",
+    partial: "Part of the content was imported. It is best to add more source text before organizing it.",
     needsUserInput:
-      "The source or link was recognized, but the body text is still insufficient. You can create the record and add subtitles, notes, or source text manually.",
+      "The source or link was recognized, but the body text is still insufficient. You can create the record and add subtitles, notes, or source text in the editor below.",
     failedButCreatable: "The automatic import flow did not complete, but you can still create the record.",
-    htmlOnlyReady: "Web page text was extracted and is ready to review.",
+    htmlOnlyReady: "Web page text was extracted and is ready to organize.",
     htmlOnlyNoOcr: "Web page text was extracted, but text inside the images is still missing because OCR was not attempted for this import.",
     htmlOnlyProviderUnavailable: "Web page text was extracted, but text inside the images is still missing because OCR is not configured on this server.",
     htmlAndOcr: "Web page text was extracted and some image text was added through OCR.",
-    metaOnly: "Only the title or excerpt was extracted. Add the main body text before organizing it.",
-    insufficient: "Not enough reusable text was extracted. Please add the body text manually.",
+    metaOnly: "Only the title or excerpt was extracted. Please add the main body text.",
+    insufficient: "Not enough reusable text was extracted. Please add the body text in the editor below.",
+    partialHelper: "Only part of the reusable text was imported. Please continue adding the source text below.",
+    insufficientHelper: "Only the title or excerpt was imported. Please add the main body text below.",
+    failedHelper:
+      "The link could not be turned into reusable body text automatically, but you can still add it manually below and create the record.",
     ocrNotAttemptedHint: (count: number) =>
       `${count} image(s) may carry body text, but OCR was not attempted for this import.`,
     ocrProviderUnavailableHint: (count: number) =>
       `${count} image(s) may carry body text, but OCR is not configured on this server.`,
     ocrNotAttemptedCappedHint: (found: number, selected: number) =>
-      `${found} image signals were detected, but only the first ${selected} are currently selected as body-image candidates, and OCR was not attempted.`,
+      `${found} image signals were detected, and only the first ${selected} are currently selected as body-image candidates, but OCR was not attempted.`,
     ocrProviderUnavailableCappedHint: (found: number, selected: number) =>
-      `${found} image signals were detected, but only the first ${selected} are currently selected as body-image candidates, and OCR is not configured on this server.`,
+      `${found} image signals were detected, and only the first ${selected} are currently selected as body-image candidates, and OCR is not configured on this server.`,
     ocrNotAttemptedFilteredHint: (found: number, selected: number) =>
       `${found} image signals were detected, but only ${selected} currently match the body-image filter, and OCR was not attempted.`,
     ocrProviderUnavailableFilteredHint: (found: number, selected: number) =>
@@ -1390,7 +1399,7 @@ const importUiMessages = {
     ocrPartialSignalsHint: (found: number, selected: number) =>
       `${found} image signals were detected on the page, and the current coverage estimate only uses ${selected} body-image candidates.`,
     ocrSuccessfulHint: (succeeded: number, detected: number) =>
-      `OCR recognized text from ${succeeded}/${detected} body image(s). You can still refine the content if needed.`,
+      `OCR recognized text from ${succeeded}/${detected} body image(s).`,
     ocrNoTextHint: (attempted: number) =>
       `OCR checked ${attempted} image(s), but no reusable text was detected.`,
     multipleTracksAvailable: "Multiple subtitle tracks were found. You can keep the current result or switch to another track.",
@@ -1418,6 +1427,9 @@ const importUiMessages = {
     htmlAndOcr: string;
     metaOnly: string;
     insufficient: string;
+    partialHelper: string;
+    insufficientHelper: string;
+    failedHelper: string;
     ocrNotAttemptedHint: (count: number) => string;
     ocrProviderUnavailableHint: (count: number) => string;
     ocrNotAttemptedCappedHint: (found: number, selected: number) => string;

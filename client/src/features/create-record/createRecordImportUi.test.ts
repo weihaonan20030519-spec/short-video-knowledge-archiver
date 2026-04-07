@@ -57,14 +57,14 @@ describe("createRecordImportUi", () => {
       "已提取网页文本，但图片中的文字尚未识别（当前未配置 OCR 能力）。"
     );
     expect(getPasteLinkHelperMessage(providerUnavailableResult, "zh-CN")).toBe(
-      "检测到 2 张可能承载正文的图片，但当前服务端未配置 OCR 能力。"
+      "检测到 2 张可能承载正文的图片，但图片中的文字尚未识别（当前未配置 OCR 能力）。"
     );
 
     expect(getPasteLinkResultPrimaryMessage(notAttemptedResult, "zh-CN")).toBe(
       "已提取网页文本，但图片中的文字尚未识别（本次未尝试 OCR）。"
     );
     expect(getPasteLinkHelperMessage(notAttemptedResult, "zh-CN")).toBe(
-      "检测到 2 张可能承载正文的图片，但本次未尝试 OCR。"
+      "检测到 2 张可能承载正文的图片，但图片中的文字本次未尝试识别。"
     );
   });
 
@@ -81,7 +81,65 @@ describe("createRecordImportUi", () => {
     });
 
     expect(getPasteLinkHelperMessage(cappedResult, "zh-CN")).toBe(
-      "检测到 9 张图片信号，当前仅选取前 3 张作为正文候选图，但当前服务端未配置 OCR 能力。"
+      "检测到 9 张图片信号，当前仅选取前 3 张作为正文候选图，但图片中的文字尚未识别（当前未配置 OCR 能力）。"
+    );
+  });
+
+  it("keeps the analysis-range gap visible when OCR succeeded on only part of the candidate images", () => {
+    const partialOcrResult = createLinkImportResult({
+      warnings: [],
+      linkExtractionReport: {
+        ...createLinkImportResult().linkExtractionReport!,
+        imageSignalsFound: 9,
+        candidateImagesSelected: 3,
+        imageOcrSucceeded: 2,
+        hasImageOcrText: true,
+        ocrStatus: "successful"
+      }
+    });
+
+    const helper = getPasteLinkHelperMessage(partialOcrResult, "zh-CN");
+    expect(helper).toContain("9 张图片信号");
+    expect(helper).toContain("3 张正文候选图");
+    expect(helper).not.toContain("已识别");
+  });
+
+  it("keeps the analysis-range gap visible when OCR was attempted but no text was found", () => {
+    const noTextResult = createLinkImportResult({
+      warnings: [{ code: "OCR_NO_TEXT_DETECTED", message: "no text" }],
+      linkExtractionReport: {
+        ...createLinkImportResult().linkExtractionReport!,
+        imageSignalsFound: 9,
+        candidateImagesSelected: 3,
+        imageOcrAttempted: 3,
+        ocrStatus: "attempted_no_text"
+      }
+    });
+
+    const helper = getPasteLinkHelperMessage(noTextResult, "zh-CN");
+    expect(helper).toContain("9 张图片信号");
+    expect(helper).toContain("3 张正文候选图");
+    expect(helper).not.toContain("未提取到可用文字");
+  });
+
+  it("keeps partial results concise without sounding complete", () => {
+    const partialResult = createLinkImportResult({
+      warnings: [],
+      linkExtractionReport: {
+        ...createLinkImportResult().linkExtractionReport!,
+        imageSignalsFound: 0,
+        candidateImagesSelected: 0,
+        hasImageOcrText: false,
+        coverageLevel: "partial",
+        ocrStatus: "not_applicable"
+      }
+    });
+
+    expect(getPasteLinkResultPrimaryMessage(partialResult, "zh-CN")).toBe(
+      "已导入部分内容，建议先补充正文再整理。"
+    );
+    expect(getPasteLinkHelperMessage(partialResult, "zh-CN")).toBe(
+      "当前只拿到部分可整理文本，建议在下方继续补充原始内容。"
     );
   });
 });
