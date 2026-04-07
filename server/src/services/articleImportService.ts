@@ -316,6 +316,7 @@ function buildExtractionReport(input: {
   candidateSelectionReasons?: ArticleImportCandidateSelectionReason[];
   imageOcrAttempted?: number;
   imageOcrSucceeded?: number;
+  imageOcrFailed?: number;
   imageOcrTextLength?: number;
   ocrStatus?: ArticleImportOcrStatus;
 }): ArticleImportExtractionReport {
@@ -328,6 +329,7 @@ function buildExtractionReport(input: {
   const candidateSelectionReasons = input.candidateSelectionReasons ?? [];
   const imageOcrAttempted = input.imageOcrAttempted ?? 0;
   const imageOcrSucceeded = input.imageOcrSucceeded ?? 0;
+  const imageOcrFailed = input.imageOcrFailed ?? Math.max(0, imageOcrAttempted - imageOcrSucceeded);
   const imageOcrTextLength = input.imageOcrTextLength ?? 0;
   const hasHtmlText = extractionSources.includes("html_text");
   const hasImageOcrText = extractionSources.includes("image_ocr") && imageOcrTextLength > 0;
@@ -358,6 +360,7 @@ function buildExtractionReport(input: {
     candidateSelectionReasons,
     imageOcrAttempted,
     imageOcrSucceeded,
+    imageOcrFailed,
     imageOcrTextLength,
     ocrStatus: input.ocrStatus ?? "not_applicable",
     coverageLevel
@@ -679,10 +682,20 @@ export async function importArticleContent(
           resolvedUrl,
           images: contentImageCandidates
         });
-        imageOcrAttempted = ocrResult.attempted;
-        imageOcrSucceeded = ocrResult.succeededCount;
-        imageOcrText = normalizeWhitespace(ocrResult.recognizedText);
-        imageOcrTextLength = ocrResult.recognizedTextLength;
+        const imageResults = ocrResult.imageResults;
+        imageOcrAttempted = imageResults?.length ?? ocrResult.attempted;
+        imageOcrSucceeded = imageResults
+          ? imageResults.filter((result) => result.succeeded).length
+          : ocrResult.succeededCount;
+        imageOcrText = imageResults
+          ? normalizeWhitespace(
+              imageResults
+                .filter((result) => result.succeeded && result.text)
+                .map((result) => `[Image OCR ${result.ordinal}]\n${result.text}`)
+                .join("\n\n")
+            )
+          : normalizeWhitespace(ocrResult.recognizedText);
+        imageOcrTextLength = imageOcrText?.length ?? 0;
         ocrWarnings = ocrResult.warnings;
         if (imageOcrTextLength > 0) {
           ocrStatus = imageOcrSucceeded >= imageOcrAttempted ? "successful" : "partial";

@@ -115,6 +115,7 @@ export interface ImportResult {
     candidateSelectionReasons: LinkImportCandidateSelectionReason[];
     imageOcrAttempted: number;
     imageOcrSucceeded: number;
+    imageOcrFailed: number;
     imageOcrTextLength: number;
     coverageLevel: LinkImportCoverageLevel;
     ocrStatus: LinkImportOcrStatus;

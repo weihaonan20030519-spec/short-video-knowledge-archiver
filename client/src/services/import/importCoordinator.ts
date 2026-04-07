@@ -244,6 +244,7 @@ function mapLinkExtractionReport(report: ArticleImportExtractionReport): ImportR
     candidateSelectionReasons: report.candidateSelectionReasons,
     imageOcrAttempted: report.imageOcrAttempted,
     imageOcrSucceeded: report.imageOcrSucceeded,
+    imageOcrFailed: report.imageOcrFailed,
     imageOcrTextLength: report.imageOcrTextLength,
     coverageLevel: report.coverageLevel,
     ocrStatus: report.ocrStatus

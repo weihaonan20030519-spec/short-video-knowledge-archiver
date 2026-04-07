@@ -299,6 +299,7 @@ describe("articleImportService", () => {
     expect(result.extractionReport.imageSignalsFound).toBe(1);
     expect(result.extractionReport.candidateImagesSelected).toBe(1);
     expect(result.extractionReport.ocrStatus).toBe("not_attempted");
+    expect(result.extractionReport.imageOcrFailed).toBe(0);
     expect(result.extractionReport.coverageLevel).toBe("partial");
     expect(result.warnings.map((warning) => warning.code)).toContain("OCR_NOT_ATTEMPTED");
   });
@@ -349,6 +350,7 @@ describe("articleImportService", () => {
 
     expect(result.extractionMethod).toBe("readability");
     expect(result.extractionReport.ocrStatus).toBe("successful");
+    expect(result.extractionReport.imageOcrFailed).toBe(0);
     expect(result.extractionReport.coverageLevel).toBe("partial");
   });
 

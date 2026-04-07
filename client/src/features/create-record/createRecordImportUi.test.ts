@@ -31,6 +31,7 @@ function createLinkImportResult(overrides: Partial<ImportResult> = {}): ImportRe
       candidateSelectionReasons: [],
       imageOcrAttempted: 0,
       imageOcrSucceeded: 0,
+      imageOcrFailed: 0,
       imageOcrTextLength: 0,
       coverageLevel: "partial",
       ocrStatus: "provider_unavailable"

@@ -62,6 +62,7 @@ export interface ArticleImportExtractionReport {
   candidateSelectionReasons: ArticleImportCandidateSelectionReason[];
   imageOcrAttempted: number;
   imageOcrSucceeded: number;
+  imageOcrFailed: number;
   imageOcrTextLength: number;
   ocrStatus: ArticleImportOcrStatus;
   coverageLevel: ArticleImportCoverageLevel;

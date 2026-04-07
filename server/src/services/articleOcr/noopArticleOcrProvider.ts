@@ -10,7 +10,8 @@ export class NoopArticleOcrProvider implements ArticleOcrProvider {
       succeededCount: 0,
       recognizedText: null,
       recognizedTextLength: 0,
-      warnings: []
+      warnings: [],
+      imageResults: []
     };
   }
 }

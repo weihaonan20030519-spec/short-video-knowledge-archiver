@@ -1,4 +1,4 @@
-import type { ArticleImportPlatform, ArticleImportWarning } from "../../schemas/articleImportSchemas.js";
+import type { ArticleImportPlatform, ArticleImportWarning, ArticleImportWarningCode } from "../../schemas/articleImportSchemas.js";
 
 export interface ArticleOcrCandidateImage {
   url: string;
@@ -15,6 +15,16 @@ export interface ArticleOcrRequest {
   images: ArticleOcrCandidateImage[];
 }
 
+export interface ArticleOcrImageResult {
+  ordinal: number;
+  imageUrl: string;
+  source: ArticleOcrCandidateImage["source"];
+  succeeded: boolean;
+  text: string | null;
+  warningCode?: ArticleImportWarningCode;
+  warningMessage?: string | null;
+}
+
 export interface ArticleOcrResult {
   attempted: number;
   providerAvailable: boolean;
@@ -22,6 +32,7 @@ export interface ArticleOcrResult {
   recognizedText: string | null;
   recognizedTextLength: number;
   warnings: ArticleImportWarning[];
+  imageResults?: ArticleOcrImageResult[];
 }
 
 export interface ArticleOcrProvider {

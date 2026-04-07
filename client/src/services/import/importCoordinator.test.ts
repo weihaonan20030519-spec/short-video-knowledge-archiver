@@ -66,6 +66,7 @@ function createArticleExtractionReport(overrides: Partial<{
   candidateSelectionReasons: Array<"limited_by_cap" | "filtered_non_body_images" | "partial_page_signals_only">;
   imageOcrAttempted: number;
   imageOcrSucceeded: number;
+  imageOcrFailed: number;
   imageOcrTextLength: number;
   ocrStatus: "not_applicable" | "not_attempted" | "provider_unavailable" | "attempted_no_text" | "partial" | "successful";
   coverageLevel: "full" | "partial" | "limited" | "minimal";
@@ -81,6 +82,7 @@ function createArticleExtractionReport(overrides: Partial<{
     candidateSelectionReasons: overrides.candidateSelectionReasons ?? [],
     imageOcrAttempted: overrides.imageOcrAttempted ?? 0,
     imageOcrSucceeded: overrides.imageOcrSucceeded ?? 0,
+    imageOcrFailed: overrides.imageOcrFailed ?? Math.max(0, (overrides.imageOcrAttempted ?? 0) - (overrides.imageOcrSucceeded ?? 0)),
     imageOcrTextLength: overrides.imageOcrTextLength ?? 0,
     ocrStatus: overrides.ocrStatus ?? "not_applicable",
     coverageLevel: overrides.coverageLevel ?? "full"
@@ -202,6 +204,43 @@ describe("importCoordinator", () => {
     expect(session.result?.outcome).toBe("failed_but_creatable");
     expect(session.result?.warnings.map((warning) => warning.code)).toContain("SECURITY_BLOCKED");
     expect(deriveImportFlowState(session.result)).toBe("error_but_can_continue");
+  });
+
+  it("preserves imageOcrFailed from article extraction report", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      json: async () => ({
+        success: true,
+        data: {
+          originalUrl: "https://example.com/article/failing-ocr",
+          resolvedUrl: "https://example.com/article/failing-ocr",
+          platform: "other",
+          title: "Example",
+          excerpt: "Example excerpt",
+          contentText: "Example content",
+          fetchSucceeded: true,
+          extractionMethod: "readability",
+          extractionReport: createArticleExtractionReport({
+            imageOcrAttempted: 3,
+            imageOcrSucceeded: 1,
+            imageOcrFailed: 2,
+            ocrStatus: "partial",
+            coverageLevel: "partial"
+          }),
+          warnings: []
+        },
+        error: null
+      })
+    }));
+
+    const session = await resolveImport({
+      inputMethod: "link",
+      originalUrl: "https://example.com/article/failing-ocr",
+      appLanguage: "zh-CN"
+    });
+
+    expect(session.result?.linkExtractionReport?.imageOcrFailed).toBe(2);
+    expect(session.result?.linkExtractionReport?.imageOcrAttempted).toBe(3);
+    expect(session.result?.linkExtractionReport?.imageOcrSucceeded).toBe(1);
   });
 
   it("maps a successful bilibili transcript import to complete and preserves import summary", async () => {

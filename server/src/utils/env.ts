@@ -8,6 +8,7 @@ const envSchema = z.object({
   GEMINI_MODEL_CONCISE: z.string().default("gemini-2.5-flash-lite"),
   GEMINI_MODEL_LEARNING: z.string().default("gemini-2.5-flash"),
   GEMINI_MODEL_TRANSCRIPTION: z.string().default("gemini-2.5-flash"),
+  ARTICLE_OCR_MODEL: z.string().default("gemini-2.5-flash"),
   APP_ORIGIN: z.string().optional(),
   TRANSCRIPTION_PROVIDER: z.enum(["gemini"]).default("gemini"),
   ANALYSIS_PROVIDER: z.enum(["gemini"]).default("gemini"),
