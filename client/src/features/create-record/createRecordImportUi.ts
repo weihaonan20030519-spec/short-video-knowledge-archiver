@@ -230,41 +230,25 @@ function getImageGapHelperMessage(
 
   const found = summary.imageSignalsFound;
   const selected = summary.candidateImagesSelected;
-  const reasons = new Set(report.candidateSelectionReasons);
+  const coverageGapPrefix = importText.ocrCoverageGapHint(found, selected);
 
-  if (found > selected) {
-    if (reasons.has("limited_by_cap")) {
-      return summary.ocrStatus === "provider_unavailable"
-        ? importText.ocrProviderUnavailableCappedHint(found, selected)
-        : importText.ocrNotAttemptedCappedHint(found, selected);
-    }
-
-    if (reasons.has("filtered_non_body_images")) {
-      return summary.ocrStatus === "provider_unavailable"
-        ? importText.ocrProviderUnavailableFilteredHint(found, selected)
-        : importText.ocrNotAttemptedFilteredHint(found, selected);
-    }
-
-    return importText.ocrPartialSignalsHint(found, selected);
-  }
-
-  if (summary.ocrStatus === "provider_unavailable") {
-    return importText.ocrProviderUnavailableHint(selected);
-  }
-
-  if (summary.ocrStatus === "not_attempted") {
-    return importText.ocrNotAttemptedHint(selected);
+  if (summary.hasImageOcrText) {
+    return `${coverageGapPrefix}${importText.ocrGapPartialSuccessHint}`;
   }
 
   if (summary.ocrStatus === "attempted_no_text") {
-    return importText.ocrNoTextHint(report.imageOcrAttempted);
+    return `${coverageGapPrefix}${importText.ocrGapAttemptedNoTextHint}`;
   }
 
-  if (summary.hasImageOcrText) {
-    return importText.ocrSuccessfulHint(report.imageOcrSucceeded, selected);
+  if (summary.ocrStatus === "not_attempted") {
+    return `${coverageGapPrefix}${importText.ocrGapNotAttemptedHint}`;
   }
 
-  return summary.shouldSuggestSupplement ? importText.insufficient : null;
+  if (summary.ocrStatus === "provider_unavailable") {
+    return `${coverageGapPrefix}${importText.ocrGapProviderUnavailableHint}`;
+  }
+
+  return `${coverageGapPrefix}${importText.ocrPartialSignalsHint(found, selected)}`;
 }
 
 function getNonImageGapHelperMessage(

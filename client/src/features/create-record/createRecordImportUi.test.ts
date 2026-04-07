@@ -56,16 +56,16 @@ describe("createRecordImportUi", () => {
     expect(getPasteLinkResultPrimaryMessage(providerUnavailableResult, "zh-CN")).toBe(
       "已提取网页文本，但图片中的文字尚未识别（当前未配置 OCR 能力）。"
     );
-    expect(getPasteLinkHelperMessage(providerUnavailableResult, "zh-CN")).toBe(
-      "检测到 2 张可能承载正文的图片，但图片中的文字尚未识别（当前未配置 OCR 能力）。"
-    );
+    expect(getPasteLinkHelperMessage(providerUnavailableResult, "zh-CN")).toContain("检测到 2 张图片信号");
+    expect(getPasteLinkHelperMessage(providerUnavailableResult, "zh-CN")).toContain("当前仅分析前 2 张正文候选图");
+    expect(getPasteLinkHelperMessage(providerUnavailableResult, "zh-CN")).toContain("图片中的文字尚未识别");
 
     expect(getPasteLinkResultPrimaryMessage(notAttemptedResult, "zh-CN")).toBe(
       "已提取网页文本，但图片中的文字尚未识别（本次未尝试 OCR）。"
     );
-    expect(getPasteLinkHelperMessage(notAttemptedResult, "zh-CN")).toBe(
-      "检测到 2 张可能承载正文的图片，但图片中的文字本次未尝试识别。"
-    );
+    expect(getPasteLinkHelperMessage(notAttemptedResult, "zh-CN")).toContain("检测到 2 张图片信号");
+    expect(getPasteLinkHelperMessage(notAttemptedResult, "zh-CN")).toContain("当前仅分析前 2 张正文候选图");
+    expect(getPasteLinkHelperMessage(notAttemptedResult, "zh-CN")).toContain("图片文字本次未尝试识别");
   });
 
   it("explains when more image signals were found than the current candidate cap allows", () => {
@@ -80,9 +80,10 @@ describe("createRecordImportUi", () => {
       }
     });
 
-    expect(getPasteLinkHelperMessage(cappedResult, "zh-CN")).toBe(
-      "检测到 9 张图片信号，当前仅选取前 3 张作为正文候选图，但图片中的文字尚未识别（当前未配置 OCR 能力）。"
-    );
+    const helper = getPasteLinkHelperMessage(cappedResult, "zh-CN");
+    expect(helper).toContain("检测到 9 张图片信号");
+    expect(helper).toContain("当前仅分析前 3 张正文候选图");
+    expect(helper).toContain("图片中的文字尚未识别");
   });
 
   it("keeps the analysis-range gap visible when OCR succeeded on only part of the candidate images", () => {
@@ -92,16 +93,22 @@ describe("createRecordImportUi", () => {
         ...createLinkImportResult().linkExtractionReport!,
         imageSignalsFound: 9,
         candidateImagesSelected: 3,
+        imageOcrAttempted: 3,
         imageOcrSucceeded: 2,
         hasImageOcrText: true,
-        ocrStatus: "successful"
+        ocrStatus: "partial"
       }
     });
+
+    expect(getPasteLinkResultPrimaryMessage(partialOcrResult, "zh-CN")).toBe(
+      "已提取网页文本，并补充识别了部分图片文字。"
+    );
 
     const helper = getPasteLinkHelperMessage(partialOcrResult, "zh-CN");
     expect(helper).toContain("9 张图片信号");
     expect(helper).toContain("3 张正文候选图");
-    expect(helper).not.toContain("已识别");
+    expect(helper).toContain("部分图片文字已识别");
+    expect(helper).not.toContain("本次未尝试识别");
   });
 
   it("keeps the analysis-range gap visible when OCR was attempted but no text was found", () => {
@@ -119,7 +126,9 @@ describe("createRecordImportUi", () => {
     const helper = getPasteLinkHelperMessage(noTextResult, "zh-CN");
     expect(helper).toContain("9 张图片信号");
     expect(helper).toContain("3 张正文候选图");
-    expect(helper).not.toContain("未提取到可用文字");
+    expect(helper).toContain("图片文字本次已尝试识别");
+    expect(helper).toContain("未成功识别");
+    expect(helper).not.toContain("本次未尝试识别");
   });
 
   it("keeps partial results concise without sounding complete", () => {

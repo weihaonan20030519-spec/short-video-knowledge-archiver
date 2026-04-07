@@ -181,8 +181,52 @@ function mapArticleWarnings(
 ): ImportWarning[] {
   return warnings.map((warning) => ({
     code: warning.code,
-    message: warning.message || getImportIssueMessage(warning.code, language)
+    message: normalizeArticleImportWarningMessage(warning, language)
   }));
+}
+
+function normalizeArticleImportWarningMessage(warning: ImportWarning, language: AppLanguage) {
+  const fallbackMessage = getImportIssueMessage(warning.code, language);
+  const rawMessage = warning.message?.trim() || "";
+
+  if (!rawMessage) {
+    return fallbackMessage;
+  }
+
+  if (warning.code !== "OCR_NOT_ATTEMPTED" && warning.code !== "OCR_PROVIDER_UNAVAILABLE" && warning.code !== "OCR_NO_TEXT_DETECTED") {
+    return rawMessage;
+  }
+
+  const lowered = rawMessage.toLowerCase();
+  const looksLikeProviderPayload =
+    rawMessage.startsWith("{") ||
+    rawMessage.includes('"error"') ||
+    rawMessage.includes('"code"') ||
+    lowered.includes("api_key_invalid") ||
+    lowered.includes("api_key_expired") ||
+    lowered.includes("api key") ||
+    lowered.includes("gemini") ||
+    lowered.includes("error");
+
+  if (/(503|high demand|temporarily unavailable|\bunavailable\b)/i.test(rawMessage)) {
+    return language === "zh-CN"
+      ? "图片文字识别部分失败：当前模型服务繁忙，请稍后重试。"
+      : "Image text recognition partially failed: the model service is busy right now. Please try again later.";
+  }
+
+  if (/(api[_ -]?key|invalid|expired)/i.test(lowered) && looksLikeProviderPayload) {
+    return language === "zh-CN"
+      ? "图片文字识别失败：当前服务端 Gemini 配置无效或已过期，请检查 API key。"
+      : "Image text recognition failed: the server-side Gemini configuration looks invalid or expired. Please check the API key.";
+  }
+
+  if (looksLikeProviderPayload) {
+    return language === "zh-CN"
+      ? "图片文字识别失败：本次 OCR 处理出现异常，可稍后重试或手动补充原始内容。"
+      : "Image text recognition failed: an unexpected OCR error occurred. Please try again later or add the original content manually.";
+  }
+
+  return rawMessage;
 }
 
 function mapCoverageToContentCompleteness(

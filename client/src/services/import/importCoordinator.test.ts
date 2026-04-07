@@ -314,6 +314,58 @@ describe("importCoordinator", () => {
     expect(session.result?.linkExtractionReport?.ocrStatus).toBe("provider_unavailable");
   });
 
+  it("normalizes OCR warning messages before they reach the UI", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      json: async () => ({
+        success: true,
+        data: {
+          originalUrl: "https://example.com/article/ocr-errors",
+          resolvedUrl: "https://example.com/article/ocr-errors",
+          platform: "other",
+          title: "Example",
+          excerpt: "Example excerpt",
+          contentText: "Example content",
+          fetchSucceeded: true,
+          extractionMethod: "readability",
+          extractionReport: createArticleExtractionReport({
+            extractionSources: ["html_text"],
+            htmlTextLength: 160,
+            ocrStatus: "provider_unavailable",
+            coverageLevel: "partial"
+          }),
+          warnings: [
+            {
+              code: "OCR_PROVIDER_UNAVAILABLE",
+              message: '{"error":{"code":503,"message":"This model is currently experiencing high demand."}}'
+            },
+            {
+              code: "OCR_NO_TEXT_DETECTED",
+              message: '{"error":{"code":"API_KEY_INVALID","message":"API key expired."}}'
+            },
+            {
+              code: "OCR_NO_TEXT_DETECTED",
+              message: '{"error":{"code":500,"message":"Unexpected OCR provider failure."}}'
+            }
+          ]
+        },
+        error: null
+      })
+    }));
+
+    const session = await resolveImport({
+      inputMethod: "link",
+      originalUrl: "https://example.com/article/ocr-errors",
+      appLanguage: "zh-CN"
+    });
+
+    const messages = session.result?.warnings.map((warning) => warning.message) ?? [];
+    expect(messages).toHaveLength(3);
+    expect(messages[0]).toContain("当前模型服务繁忙");
+    expect(messages[1]).toContain("Gemini 配置无效或已过期");
+    expect(messages[2]).toContain("OCR 处理出现异常");
+    expect(messages.join(" ")).not.toContain('{"error"');
+  });
+
   it("keeps multi-track imports in awaiting_track_selection and marks weak content as needs_user_input", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       json: async () => ({

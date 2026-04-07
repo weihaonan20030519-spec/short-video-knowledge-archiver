@@ -39,6 +39,8 @@ export function CreateRecordLinkSection({
   const importText = getImportUiMessages(appLanguage);
   const showTrackSelector = trackOptions.length > 1;
   const showStatusPanel = hasAttemptedImport && (primaryMessage || helperMessage || importResult);
+  const visibleWarnings = importResult?.warnings.filter((warning) => warning.message.trim()) ?? [];
+  const showImportResultPanel = Boolean(importResult && (showTrackSelector || visibleWarnings.length > 0));
 
   return (
     <div className="space-y-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4">
@@ -67,7 +69,7 @@ export function CreateRecordLinkSection({
 
           {helperMessage ? <p className="px-1 text-xs leading-6 text-slate-500">{helperMessage}</p> : null}
 
-          {importResult ? (
+          {showImportResultPanel ? (
             <div className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600">
               {showTrackSelector ? (
                 <label className="block">
@@ -90,10 +92,10 @@ export function CreateRecordLinkSection({
                 </label>
               ) : null}
 
-              {importResult.warnings.length ? (
+              {visibleWarnings.length ? (
                 <div className={`${showTrackSelector ? "mt-3" : ""} rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-5 text-slate-600`}>
                   <p className="font-medium text-slate-700">{importText.warningsTitle}</p>
-                  {importResult.warnings.map((warning) => (
+                  {visibleWarnings.map((warning) => (
                     <p key={warning.code}>{warning.message}</p>
                   ))}
                 </div>

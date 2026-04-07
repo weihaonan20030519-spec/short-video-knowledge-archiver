@@ -373,7 +373,7 @@ describe("CreateRecordModal upload flow", () => {
     await user.click(screen.getByRole("button", { name: "尝试提取链接内容" }));
 
     expect(await screen.findByText("已提取网页文本，但图片中的文字尚未识别（当前未配置 OCR 能力）。")).toBeInTheDocument();
-    expect(screen.getByText("检测到 5 张图片信号，但当前仅有 2 张符合正文候选条件，且当前服务端未配置 OCR 能力。")).toBeInTheDocument();
+    expect(screen.getByText("检测到 5 张图片信号，当前仅分析前 2 张正文候选图；图片中的文字尚未识别（当前未配置 OCR 能力）。")).toBeInTheDocument();
     expect(screen.getByDisplayValue("小红书图文笔记")).toBeInTheDocument();
     const contentField = screen.getByRole("textbox", { name: "原始内容 / 字幕 / 备注" }) as HTMLTextAreaElement;
     expect(contentField.value).toContain("这是从链接里提取到的一段较完整正文");

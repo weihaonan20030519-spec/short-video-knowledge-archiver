@@ -1342,6 +1342,12 @@ const importUiMessages = {
     partialHelper: "当前只拿到部分可整理文本，建议在下方继续补充原始内容。",
     insufficientHelper: "当前只拿到标题或摘要，建议在下方补充正文。",
     failedHelper: "未能自动提取可用正文，但仍可在下方手动补充后继续创建记录。",
+    ocrCoverageGapHint: (found: number, selected: number) =>
+      `检测到 ${found} 张图片信号，当前仅分析前 ${selected} 张正文候选图；`,
+    ocrGapPartialSuccessHint: "部分图片文字已识别。",
+    ocrGapAttemptedNoTextHint: "图片文字本次已尝试识别，但未成功识别。",
+    ocrGapNotAttemptedHint: "图片文字本次未尝试识别。",
+    ocrGapProviderUnavailableHint: "图片中的文字尚未识别（当前未配置 OCR 能力）。",
     ocrNotAttemptedHint: (count: number) => `检测到 ${count} 张可能承载正文的图片，但图片中的文字本次未尝试识别。`,
     ocrProviderUnavailableHint: (count: number) => `检测到 ${count} 张可能承载正文的图片，但图片中的文字尚未识别（当前未配置 OCR 能力）。`,
     ocrNotAttemptedCappedHint: (found: number, selected: number) =>
@@ -1355,7 +1361,7 @@ const importUiMessages = {
     ocrPartialSignalsHint: (found: number, selected: number) =>
       `页面里检测到 ${found} 张图片信号，当前仅基于其中 ${selected} 张正文候选图判断覆盖度。`,
     ocrSuccessfulHint: (succeeded: number, detected: number) => `已识别 ${succeeded}/${detected} 张正文图片中的文字。`,
-    ocrNoTextHint: (attempted: number) => `已尝试识别 ${attempted} 张图片，但未提取到可用文字。`,
+    ocrNoTextHint: (attempted: number) => `已尝试识别 ${attempted} 张图片，但未成功识别出可用文字。`,
     multipleTracksAvailable: "已检测到多条字幕轨，可继续使用当前结果，也可切换其他轨道。",
     selectTrackRecommended: "当前检测到多条字幕轨，建议先选择一条再创建记录。",
     selectTrackPlaceholder: "请选择字幕轨",
@@ -1384,6 +1390,12 @@ const importUiMessages = {
     insufficientHelper: "Only the title or excerpt was imported. Please add the main body text below.",
     failedHelper:
       "The link could not be turned into reusable body text automatically, but you can still add it manually below and create the record.",
+    ocrCoverageGapHint: (found: number, selected: number) =>
+      `Detected ${found} image signals, and only the first ${selected} body-image candidates were analyzed;`,
+    ocrGapPartialSuccessHint: "Some image text was recognized.",
+    ocrGapAttemptedNoTextHint: "OCR was attempted for the image text, but no usable text was recognized.",
+    ocrGapNotAttemptedHint: "OCR was not attempted for the image text in this import.",
+    ocrGapProviderUnavailableHint: "The image text is still missing because OCR is not configured on this server.",
     ocrNotAttemptedHint: (count: number) =>
       `${count} image(s) may carry body text, but OCR was not attempted for this import.`,
     ocrProviderUnavailableHint: (count: number) =>
@@ -1401,7 +1413,7 @@ const importUiMessages = {
     ocrSuccessfulHint: (succeeded: number, detected: number) =>
       `OCR recognized text from ${succeeded}/${detected} body image(s).`,
     ocrNoTextHint: (attempted: number) =>
-      `OCR checked ${attempted} image(s), but no reusable text was detected.`,
+      `OCR checked ${attempted} image(s), but no usable text was recognized.`,
     multipleTracksAvailable: "Multiple subtitle tracks were found. You can keep the current result or switch to another track.",
     selectTrackRecommended: "Multiple subtitle tracks were found. Choosing one before creating is recommended.",
     selectTrackPlaceholder: "Choose a subtitle track",
@@ -1436,6 +1448,11 @@ const importUiMessages = {
     ocrProviderUnavailableCappedHint: (found: number, selected: number) => string;
     ocrNotAttemptedFilteredHint: (found: number, selected: number) => string;
     ocrProviderUnavailableFilteredHint: (found: number, selected: number) => string;
+    ocrCoverageGapHint: (found: number, selected: number) => string;
+    ocrGapPartialSuccessHint: string;
+    ocrGapAttemptedNoTextHint: string;
+    ocrGapNotAttemptedHint: string;
+    ocrGapProviderUnavailableHint: string;
     ocrPartialSignalsHint: (found: number, selected: number) => string;
     ocrSuccessfulHint: (succeeded: number, detected: number) => string;
     ocrNoTextHint: (attempted: number) => string;
