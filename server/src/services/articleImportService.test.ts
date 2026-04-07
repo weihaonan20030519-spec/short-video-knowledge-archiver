@@ -303,6 +303,97 @@ describe("articleImportService", () => {
     expect(result.warnings.map((warning) => warning.code)).toContain("OCR_NOT_ATTEMPTED");
   });
 
+  it("keeps full html partial when selected body images are OCRed successfully", async () => {
+    const fetcher = vi.fn(async () =>
+      new Response(
+        `
+          <html>
+            <body>
+              <article>
+                <p>This article body contains enough full text to meet the coverage threshold for the import flow, while also including multiple large body images that should still count as a candidate image gap.</p>
+                <img src="https://cdn.example.com/illustration-1.jpg" width="900" height="1200" alt="步骤图一" />
+                <img src="https://cdn.example.com/illustration-2.jpg" width="900" height="1200" alt="步骤图二" />
+              </article>
+            </body>
+          </html>
+        `,
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html"
+          }
+        }
+      )
+    );
+
+    const result = await importArticleContent(
+      {
+        url: "https://example.com/guide"
+      },
+      {
+        fetcher,
+        timeoutMs: 200,
+        ocrProvider: {
+          providerAvailable: true,
+          extractText: vi.fn(async () => ({
+            attempted: 1,
+            providerAvailable: true,
+            succeededCount: 1,
+            recognizedText: "这是图像文字",
+            recognizedTextLength: 6,
+            warnings: []
+          }))
+        }
+      }
+    );
+
+    expect(result.extractionMethod).toBe("readability");
+    expect(result.extractionReport.ocrStatus).toBe("successful");
+    expect(result.extractionReport.coverageLevel).toBe("partial");
+  });
+
+  it("retains full coverage when only coarse image signals exist and no body candidate images are selected", async () => {
+    const fetcher = vi.fn(async () =>
+      new Response(
+        `
+          <html>
+            <head>
+              <meta property="og:image" content="https://cdn.example.com/cover-1.jpg" />
+              <meta property="og:image" content="https://cdn.example.com/cover-2.jpg" />
+            </head>
+            <body>
+              <article>
+                <p>This article body contains enough full text to meet the coverage threshold, while the only image signals are coarse page-level metadata images.</p>
+              </article>
+            </body>
+          </html>
+        `,
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html"
+          }
+        }
+      )
+    );
+
+    const result = await importArticleContent(
+      {
+        url: "https://example.com/full-with-meta-images"
+      },
+      {
+        fetcher,
+        timeoutMs: 200
+      }
+    );
+
+    expect(result.extractionMethod).toBe("readability");
+    expect(result.extractionReport.imageSignalsFound).toBe(2);
+    expect(result.extractionReport.candidateImagesSelected).toBe(2);
+    expect(result.extractionReport.coverageLevel).toBe("full");
+    expect(result.extractionReport.candidateSelectionReasons).toContain("partial_page_signals_only");
+  });
+
   it("falls back to og:image candidates when readability content has no body images", async () => {
     const fetcher = vi.fn(async () =>
       new Response(
@@ -344,7 +435,7 @@ describe("articleImportService", () => {
     expect(result.extractionReport.imageSignalsFound).toBe(2);
     expect(result.extractionReport.candidateImagesSelected).toBe(2);
     expect(result.extractionReport.ocrStatus).toBe("provider_unavailable");
-    expect(result.extractionReport.coverageLevel).toBe("partial");
+    expect(result.extractionReport.coverageLevel).toBe("full");
     expect(result.extractionReport.candidateSelectionReasons).toContain("partial_page_signals_only");
     expect(result.warnings.map((warning) => warning.code)).toContain("OCR_PROVIDER_UNAVAILABLE");
   });

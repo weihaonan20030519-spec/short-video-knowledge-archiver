@@ -11,6 +11,7 @@ const envSchema = z.object({
   APP_ORIGIN: z.string().optional(),
   TRANSCRIPTION_PROVIDER: z.enum(["gemini"]).default("gemini"),
   ANALYSIS_PROVIDER: z.enum(["gemini"]).default("gemini"),
+  ARTICLE_OCR_PROVIDER: z.enum(["noop", "gemini"]).default("noop"),
   TRANSCRIPTION_MAX_FILE_SIZE_MB: z.coerce.number().int().positive().default(50),
   TRANSCRIPTION_RECOMMENDED_MAX_MINUTES: z.coerce.number().int().positive().default(15),
   TRANSCRIPTION_FILE_READY_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1000),

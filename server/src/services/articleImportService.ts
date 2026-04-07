@@ -1,7 +1,6 @@
-import { isIP } from "node:net";
-
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
+import { ensureSafeUrl } from "../utils/safeUrl.js";
 
 import {
   articleImportRequestSchema,
@@ -86,75 +85,6 @@ function createWarning(code: ArticleImportWarningCode, message: string): Article
   return { code, message };
 }
 
-function isPrivateIpv4(hostname: string) {
-  if (hostname.startsWith("10.")) {
-    return true;
-  }
-
-  if (hostname.startsWith("127.")) {
-    return true;
-  }
-
-  if (hostname.startsWith("192.168.")) {
-    return true;
-  }
-
-  if (hostname.startsWith("169.254.")) {
-    return true;
-  }
-
-  const match = hostname.match(/^172\.(\d{1,3})\./);
-  if (!match) {
-    return false;
-  }
-
-  const octet = Number(match[1]);
-  return octet >= 16 && octet <= 31;
-}
-
-function isPrivateIpv6(hostname: string) {
-  const normalized = hostname.toLowerCase();
-
-  return (
-    normalized === "::1" ||
-    normalized.startsWith("fc") ||
-    normalized.startsWith("fd") ||
-    normalized.startsWith("fe80")
-  );
-}
-
-function isBlockedHost(hostname: string) {
-  const normalized = hostname.toLowerCase();
-
-  if (BLOCKED_HOSTNAMES.has(normalized) || normalized.endsWith(".localhost")) {
-    return true;
-  }
-
-  if (normalized === "0.0.0.0" || normalized === "::1") {
-    return true;
-  }
-
-  const ipVersion = isIP(normalized);
-  if (ipVersion === 4) {
-    return isPrivateIpv4(normalized);
-  }
-
-  if (ipVersion === 6) {
-    return isPrivateIpv6(normalized);
-  }
-
-  return false;
-}
-
-function ensureSafeUrl(target: URL) {
-  // This is a conservative hostname/IP guard. We do not perform DNS resolution here,
-  // so private-network checks are limited to explicit hostnames and literal IP targets.
-  if (target.protocol !== "http:" && target.protocol !== "https:") {
-    return false;
-  }
-
-  return !isBlockedHost(target.hostname);
-}
 
 function buildHandledResult(
   input: {
@@ -381,6 +311,7 @@ function buildExtractionReport(input: {
   htmlTextLength?: number;
   imageSignalsFound?: number;
   candidateImagesSelected?: number;
+  bodyCandidateImagesSelected?: number;
   ocrAttemptLimit?: number;
   candidateSelectionReasons?: ArticleImportCandidateSelectionReason[];
   imageOcrAttempted?: number;
@@ -392,6 +323,7 @@ function buildExtractionReport(input: {
   const htmlTextLength = input.htmlTextLength ?? 0;
   const imageSignalsFound = input.imageSignalsFound ?? 0;
   const candidateImagesSelected = input.candidateImagesSelected ?? 0;
+  const bodyCandidateImagesSelected = input.bodyCandidateImagesSelected ?? 0;
   const ocrAttemptLimit = input.ocrAttemptLimit ?? MAX_CANDIDATE_IMAGES;
   const candidateSelectionReasons = input.candidateSelectionReasons ?? [];
   const imageOcrAttempted = input.imageOcrAttempted ?? 0;
@@ -400,12 +332,14 @@ function buildExtractionReport(input: {
   const hasHtmlText = extractionSources.includes("html_text");
   const hasImageOcrText = extractionSources.includes("image_ocr") && imageOcrTextLength > 0;
   const htmlCompleteness = classifyTextCompletenessByLength(hasHtmlText ? htmlTextLength : 0);
-  const imageGap = candidateImagesSelected > 0 && !hasImageOcrText;
+  const hasSelectedBodyCandidateImages = bodyCandidateImagesSelected > 0;
+  const isFullHtml = hasHtmlText && htmlCompleteness === "full";
+  const imageGap = hasSelectedBodyCandidateImages && !hasImageOcrText;
   let coverageLevel: ArticleImportCoverageLevel;
 
-  if (hasHtmlText && htmlCompleteness === "full" && !imageGap) {
+  if (isFullHtml && !hasSelectedBodyCandidateImages) {
     coverageLevel = "full";
-  } else if ((hasHtmlText && htmlCompleteness === "full" && imageGap) || (hasHtmlText && htmlCompleteness === "partial" && !imageGap)) {
+  } else if (isFullHtml || (hasHtmlText && htmlCompleteness === "partial" && !imageGap)) {
     coverageLevel = "partial";
   } else if (hasHtmlText || hasImageOcrText) {
     coverageLevel = "limited";
@@ -694,6 +628,7 @@ export async function importArticleContent(
     const chosenImageSummary = contentImages.candidates.length > 0 ? contentImages : metaImages;
     const candidateImagesBeforeCap = chosenImageSummary.candidates;
     const contentImageCandidates = selectCandidateImages(candidateImagesBeforeCap, MAX_CANDIDATE_IMAGES);
+    const bodyCandidateImagesSelected = contentImages.candidates.length > 0 ? contentImageCandidates.length : 0;
     const candidateSelectionReasons: ArticleImportCandidateSelectionReason[] = [];
 
     if (usingMetaFallback) {
@@ -785,6 +720,7 @@ export async function importArticleContent(
           htmlTextLength: normalizeTextLength(readabilityText),
           imageSignalsFound: chosenImageSummary.imageSignalsFound,
           candidateImagesSelected: contentImageCandidates.length,
+          bodyCandidateImagesSelected,
           ocrAttemptLimit: MAX_CANDIDATE_IMAGES,
           candidateSelectionReasons,
           imageOcrAttempted,
@@ -819,6 +755,7 @@ export async function importArticleContent(
           htmlTextLength: 0,
           imageSignalsFound: chosenImageSummary.imageSignalsFound,
           candidateImagesSelected: contentImageCandidates.length,
+          bodyCandidateImagesSelected,
           ocrAttemptLimit: MAX_CANDIDATE_IMAGES,
           candidateSelectionReasons,
           imageOcrAttempted,
@@ -854,6 +791,7 @@ export async function importArticleContent(
         htmlTextLength: 0,
         imageSignalsFound: chosenImageSummary.imageSignalsFound,
         candidateImagesSelected: contentImageCandidates.length,
+        bodyCandidateImagesSelected,
         ocrAttemptLimit: MAX_CANDIDATE_IMAGES,
         candidateSelectionReasons,
         imageOcrAttempted,
