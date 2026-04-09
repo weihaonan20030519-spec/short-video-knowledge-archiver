@@ -48,6 +48,10 @@ function deriveTranscriptionStatus(record: Partial<RecordItem>): TranscriptionSt
   return record.transcriptionStatus || "idle";
 }
 
+function deriveReviewLater(record: Partial<RecordItem>) {
+  return record.reviewLater === true;
+}
+
 function deriveMediaAsset(record: Partial<RecordItem>) {
   return buildDefaultMediaAsset(record.mediaAsset || {});
 }
@@ -134,6 +138,22 @@ export class KnowledgeArchiveDB extends Dexie {
           .toCollection()
           .modify((record: Partial<RecordItem>) => {
             record.mediaAsset = deriveMediaAsset(record);
+          });
+      });
+
+    this.version(5)
+      .stores({
+        records:
+          "id, createdAt, updatedAt, folderId, aiStatus, currentMode, sourceType, transcriptionStatus, reviewLater",
+        folders: "id, name, sortOrder",
+        tags: "id, name"
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table("records")
+          .toCollection()
+          .modify((record: Partial<RecordItem>) => {
+            record.reviewLater = deriveReviewLater(record);
           });
       });
   }

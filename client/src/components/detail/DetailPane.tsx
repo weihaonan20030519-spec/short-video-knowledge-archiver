@@ -4,24 +4,26 @@ import type { AnalyzeMode, Folder, RecordItem, Tag } from "../../types/domain";
 import { recordRepository } from "../../db/repositories/recordRepository";
 import { useAppI18n } from "../../hooks/useAppI18n";
 import { useAutoSave } from "../../hooks/useAutoSave";
+import { useElementWidthThreshold } from "../../hooks/useElementWidthThreshold";
 import { buildKnowledgeSections } from "../../lib/aiPresentation";
 import { exportRecordToPdf } from "../../lib/exportPdf";
+import {
+  canResumeTranscription,
+  type ResumeTranscriptionOutcome,
+  type ResumeTranscriptionFailureReason
+} from "../../lib/transcriptionResume";
 import {
   getMediaAssetDisplayState,
   getSafeMediaAsset
 } from "../../services/mediaAsset/mediaAssetMapper";
 import {
   getAnalyzeErrorMessage,
-  getFolderDisplayName,
-  getSourceTypeLabel
+  getFolderDisplayName
 } from "../../lib/i18n";
 import { getActiveMode } from "../../lib/aiTransform";
-import { getPlatformLabel } from "../../lib/platform";
-import {
-  getStatusLabel,
-  getTranscriptionStatusLabel,
-  statusToneMap
-} from "../../lib/status";
+import { getRecordSummarySignals } from "../../lib/recordSummary";
+import { deriveRecordSourceSummary } from "../../lib/sourceTransparency";
+import { getDisplayedTranscriptionStatusLabel } from "../../lib/status";
 import { formatDateTime, fromDateTimeLocalValue, toDateTimeLocalValue } from "../../lib/time";
 import { useUIStore } from "../../stores/uiStore";
 import { EmptyState } from "../common/EmptyState";
@@ -33,16 +35,61 @@ interface DetailPaneProps {
   folders: Folder[];
   tags: Tag[];
   onAnalyze: (record: RecordItem, mode: AnalyzeMode) => Promise<void>;
+  onResumeTranscription?: (record: RecordItem) => Promise<ResumeTranscriptionOutcome>;
   onDeleteRecord: (record: RecordItem) => Promise<void>;
 }
 
-export function DetailPane({ record, folders, tags, onAnalyze, onDeleteRecord }: DetailPaneProps) {
+function formatOriginalUrlForDisplay(originalUrl: string) {
+  const trimmedUrl = originalUrl.trim();
+
+  if (!trimmedUrl) {
+    return trimmedUrl;
+  }
+
+  const parseUrl = (value: string) => {
+    try {
+      return new URL(value);
+    } catch {
+      return null;
+    }
+  };
+
+  const parsedUrl =
+    parseUrl(trimmedUrl) ||
+    (trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")
+      ? null
+      : parseUrl(`https://${trimmedUrl}`));
+
+  const displayValue = parsedUrl
+    ? `${parsedUrl.host}${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`
+    : trimmedUrl;
+
+  if (displayValue.length <= 60) {
+    return displayValue;
+  }
+
+  return `${displayValue.slice(0, 34)}…${displayValue.slice(-18)}`;
+}
+
+export function DetailPane({
+  record,
+  folders,
+  tags,
+  onAnalyze,
+  onResumeTranscription,
+  onDeleteRecord
+}: DetailPaneProps) {
   const { appLanguage, t } = useAppI18n();
   const { showOriginalAiResult, setShowOriginalAiResult } = useUIStore();
   const [draft, setDraft] = useState<RecordItem | null>(record);
   const [aiViewMode, setAiViewMode] = useState<"preview" | "edit">("preview");
   const [pendingAnalyzeMode, setPendingAnalyzeMode] = useState<AnalyzeMode | null>(null);
   const [freshResultMode, setFreshResultMode] = useState<AnalyzeMode | null>(null);
+  const [resumeTranscriptionState, setResumeTranscriptionState] = useState<"idle" | "loading" | "error">("idle");
+  const [resumeTranscriptionErrorReason, setResumeTranscriptionErrorReason] =
+    useState<ResumeTranscriptionFailureReason | null>(null);
+  const [aiWorkspaceControlsRef, isAiWorkspaceControlsExpanded] =
+    useElementWidthThreshold<HTMLDivElement>(180, "min");
   const previousGeneratedAtRef = useRef<{ concise: string | null; learning: string | null }>({
     concise: null,
     learning: null
@@ -50,6 +97,8 @@ export function DetailPane({ record, folders, tags, onAnalyze, onDeleteRecord }:
 
   useEffect(() => {
     setDraft(record);
+    setResumeTranscriptionState("idle");
+    setResumeTranscriptionErrorReason(null);
 
     if (!record) {
       setPendingAnalyzeMode(null);
@@ -159,6 +208,11 @@ export function DetailPane({ record, folders, tags, onAnalyze, onDeleteRecord }:
   const currentFolderName = currentFolder
     ? getFolderDisplayName(currentFolder, appLanguage)
     : t.common.systemFolder;
+  const sourceSummary = deriveRecordSourceSummary(draft, appLanguage);
+  const summarySignals = getRecordSummarySignals(draft, appLanguage);
+  const showResumeTranscriptionCta = canResumeTranscription(draft) && Boolean(onResumeTranscription);
+  const originalUrl = draft.originalUrl?.trim() || "";
+  const originalUrlDisplay = originalUrl ? formatOriginalUrlForDisplay(originalUrl) : "";
   const activeResult = activeSlot
     ? showOriginalAiResult
       ? activeSlot.originalResult
@@ -178,9 +232,93 @@ export function DetailPane({ record, folders, tags, onAnalyze, onDeleteRecord }:
     draft.aiErrorCode != null
       ? getAnalyzeErrorMessage(draft.aiErrorCode, appLanguage)
       : draft.aiErrorMessage;
+  const hasSourceContent = Boolean(draft.originalContent.trim());
+  const hasAnyAiResult = Boolean(draft.aiOutputs.concise || draft.aiOutputs.learning);
+  const shouldPrioritizeAi = hasAnyAiResult;
+  const canRunAnalyze = hasSourceContent && !isAnalyzePending;
+  const showAiResultControls = Boolean(activeSlot);
+
+  const handleCopyOriginalUrl = async () => {
+    if (!originalUrl) {
+      return;
+    }
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(originalUrl);
+        return;
+      }
+    } catch {
+      // Fall back to a hidden textarea below.
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = originalUrl;
+    textarea.readOnly = true;
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    try {
+      textarea.focus();
+      textarea.select();
+      if (typeof document.execCommand === "function") {
+        document.execCommand("copy");
+      }
+    } finally {
+      document.body.removeChild(textarea);
+    }
+  };
+
+  const handleResumeTranscription = async () => {
+    if (!onResumeTranscription || !showResumeTranscriptionCta) {
+      return;
+    }
+
+    setResumeTranscriptionState("loading");
+    try {
+      const result = await onResumeTranscription(draft);
+      if (result.status === "patched") {
+        setResumeTranscriptionState("idle");
+        setResumeTranscriptionErrorReason(null);
+        return;
+      }
+
+      setResumeTranscriptionState("error");
+      setResumeTranscriptionErrorReason(result.reason);
+    } catch {
+      setResumeTranscriptionState("error");
+      setResumeTranscriptionErrorReason("request_failed");
+    }
+  };
+
+  const getResumeTranscriptionErrorMessage = () => {
+    if (!resumeTranscriptionErrorReason) {
+      return t.detail.resumeTranscriptionError;
+    }
+
+    if (resumeTranscriptionErrorReason === "request_failed") {
+      return t.detail.resumeTranscriptionErrorRequestFailed;
+    }
+
+    if (resumeTranscriptionErrorReason === "no_import_result") {
+      return t.detail.resumeTranscriptionErrorNoImportResult;
+    }
+
+    if (resumeTranscriptionErrorReason === "no_detected_content") {
+      return t.detail.resumeTranscriptionErrorNoDetectedContent;
+    }
+
+    if (resumeTranscriptionErrorReason === "patch_failed") {
+      return t.detail.resumeTranscriptionErrorPatchFailed;
+    }
+
+    return t.detail.resumeTranscriptionError;
+  };
 
   const renderAiLoadingState = () => {
-    const statusTitle = t.detail.analyzingMode(pendingModeLabel);
+    const statusTitle = t.detail.aiLoadingNoticeTitle;
     const statusDescription = t.detail.analyzingDescription(pendingModeLabel);
 
     const sectionTitles =
@@ -210,8 +348,12 @@ export function DetailPane({ record, folders, tags, onAnalyze, onDeleteRecord }:
 
       return (
         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-          <p className="font-medium text-slate-700">{t.detail.noAiResult}</p>
-          <p className="mt-1">{t.detail.noAiResultDescription}</p>
+          <p className="font-medium text-slate-700">
+            {hasSourceContent ? t.detail.noAiResult : t.detail.noAiResultNeedsSource}
+          </p>
+          <p className="mt-1">
+            {hasSourceContent ? t.detail.noAiResultDescription : t.detail.noAiResultNeedsSourceDescription}
+          </p>
         </div>
       );
     }
@@ -225,8 +367,8 @@ export function DetailPane({ record, folders, tags, onAnalyze, onDeleteRecord }:
           isAnalyzePending
             ? {
                 tone: "processing",
-                title: t.detail.analyzingMode(pendingModeLabel),
-                description: t.detail.keepPreviousResult
+                title: t.detail.aiRefreshingNoticeTitle,
+                description: t.detail.aiRefreshingNoticeDescription(pendingModeLabel)
               }
             : freshResultMode === activeMode
               ? {
@@ -237,10 +379,8 @@ export function DetailPane({ record, folders, tags, onAnalyze, onDeleteRecord }:
               : null
         }
         legend={{
-          core: t.detail.legend.core,
-          method: t.detail.legend.method,
-          action: t.detail.legend.action,
-          warning: t.detail.legend.warning
+          primary: t.detail.legend.primary,
+          secondary: t.detail.legend.secondary
         }}
       />
     );
@@ -367,113 +507,237 @@ export function DetailPane({ record, folders, tags, onAnalyze, onDeleteRecord }:
     );
   };
 
+  const originalContentSection = (
+    <SectionCard title={t.detail.originalContent}>
+      <div data-testid="detail-original-content-section">
+        <textarea
+          className="min-h-40 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-7 outline-none whitespace-pre-wrap break-words"
+          placeholder={t.detail.originalContentPlaceholder}
+          value={draft.originalContent}
+          onChange={(event) => handleRecordPatch({ originalContent: event.target.value })}
+        />
+        {!draft.originalContent.trim() ? (
+          <p className="mt-3 text-sm text-amber-700">{t.common.originalContentRequired}</p>
+        ) : null}
+      </div>
+    </SectionCard>
+  );
+
+  const aiPanelSection = (
+    <SectionCard
+      title={t.detail.aiPanel}
+      headerTestId="detail-ai-workspace-header"
+      action={
+        <div
+          ref={aiWorkspaceControlsRef}
+          className="flex max-w-full flex-wrap gap-2"
+          data-layout={isAiWorkspaceControlsExpanded ? "expanded" : "compact"}
+          data-testid="detail-ai-workspace-controls"
+        >
+          <button
+            className={`rounded-full text-xs leading-none ${
+              isAiWorkspaceControlsExpanded
+                ? "min-w-[6.5rem] px-5 py-2"
+                : "min-w-[5.75rem] px-4 py-1.5"
+            } ${
+              activeMode === "concise" ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-700"
+            }`}
+            disabled={isAnalyzePending}
+            onClick={() => handleRecordPatch({ currentMode: "concise" })}
+            type="button"
+          >
+            {t.detail.concise}
+          </button>
+          <button
+            className={`rounded-full text-xs leading-none ${
+              isAiWorkspaceControlsExpanded
+                ? "min-w-[6.5rem] px-5 py-2"
+                : "min-w-[5.75rem] px-4 py-1.5"
+            } ${
+              activeMode === "learning" ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-700"
+            }`}
+            disabled={isAnalyzePending}
+            onClick={() => handleRecordPatch({ currentMode: "learning" })}
+            type="button"
+          >
+            {t.detail.learning}
+          </button>
+        </div>
+      }
+    >
+      <div data-testid="detail-ai-section">
+        <div
+          className="mb-4 flex flex-wrap items-start gap-3"
+          data-testid="detail-ai-toolbar"
+        >
+          <button
+            data-testid="detail-ai-primary-action"
+            className="inline-flex max-w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-center text-sm font-medium text-white whitespace-normal break-words disabled:cursor-not-allowed disabled:bg-slate-400"
+            disabled={!canRunAnalyze}
+            onClick={async () => {
+              if (!hasSourceContent) {
+                return;
+              }
+              setPendingAnalyzeMode(activeMode);
+              try {
+                await onAnalyze(draft, activeMode);
+              } finally {
+                setPendingAnalyzeMode(null);
+              }
+            }}
+            type="button"
+          >
+            {isAnalyzePending ? (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+            ) : null}
+            {isAnalyzePending
+              ? t.detail.analyzingMode(pendingModeLabel)
+              : activeSlot
+                ? t.detail.retryAnalyze
+                : hasSourceContent
+                  ? t.detail.startAnalyze
+                  : t.detail.startAnalyzeAfterContent}
+          </button>
+          {showAiResultControls ? (
+            <div
+              className="flex min-w-0 flex-[1_1_18rem] flex-wrap items-center gap-3"
+              data-testid="detail-ai-result-controls"
+            >
+              <div
+                className="flex max-w-full flex-wrap gap-1 rounded-2xl bg-slate-100 p-1.5"
+                data-testid="detail-segmented-control-layout"
+              >
+                <button
+                  className={`min-w-[5.75rem] rounded-full px-4 py-1.5 text-xs leading-none ${
+                    aiViewMode === "preview" ? "bg-white text-slate-900 shadow-subtle" : "text-slate-600"
+                  }`}
+                  onClick={() => setAiViewMode("preview")}
+                  type="button"
+                >
+                  {t.detail.aiPreview}
+                </button>
+                <button
+                  className={`min-w-[5.75rem] rounded-full px-4 py-1.5 text-xs leading-none ${
+                    aiViewMode === "edit" ? "bg-white text-slate-900 shadow-subtle" : "text-slate-600"
+                  }`}
+                  disabled={!activeSlot || showOriginalAiResult}
+                  onClick={() => setAiViewMode("edit")}
+                  type="button"
+                >
+                  {t.detail.aiEdit}
+                </button>
+              </div>
+              <label className="flex min-w-0 flex-[1_1_12rem] items-start gap-2 text-sm text-slate-600 break-words">
+                <input
+                  checked={showOriginalAiResult}
+                  onChange={(event) => setShowOriginalAiResult(event.target.checked)}
+                  type="checkbox"
+                />
+                {t.detail.viewOriginal}
+              </label>
+              {activeSlot ? (
+                <span className="min-w-0 flex-[1_1_12rem] break-words text-sm text-slate-500">
+                  {t.detail.generatedAt}: {formatDateTime(activeSlot.generatedAt)}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+          {aiErrorMessage ? <span className="min-w-0 break-words text-sm text-rose-600">{aiErrorMessage}</span> : null}
+        </div>
+        {draft.aiStatus === "failed" && aiErrorMessage ? (
+          <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            <p className="font-medium">{t.detail.latestAnalyzeFailed}</p>
+            <p className="mt-1">{aiErrorMessage}</p>
+          </div>
+        ) : null}
+        {aiViewMode === "edit" ? renderAiEditor() : renderAiPreview()}
+      </div>
+    </SectionCard>
+  );
+
   return (
     <section
       className="flex h-full min-h-0 min-w-0 flex-col gap-4 overflow-y-auto rounded-[28px] border border-slate-200/90 bg-slate-50/95 p-4 shadow-panel scrollbar-thin"
       data-testid="detail-pane-scroll"
     >
-      <SectionCard
-        title={t.detail.basicInfo}
-        action={
-          <span className={`rounded-full px-3 py-1 text-xs font-medium ${statusToneMap[draft.aiStatus]}`}>
-            {getStatusLabel(draft.aiStatus, appLanguage)}
-          </span>
-        }
+      <section
+        className="rounded-3xl border border-slate-200/90 bg-white/90 px-5 py-4 shadow-subtle"
+        data-testid="detail-header-summary"
       >
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="md:col-span-2">
-            <span className="mb-2 block text-sm font-medium text-slate-700">{t.detail.title}</span>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+          {t.detail.basicInfo}
+        </p>
+        <div className="mt-3 space-y-3">
+          <label className="block">
+            <span className="sr-only">{t.detail.title}</span>
             <input
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base font-semibold text-slate-900 outline-none"
               value={draft.title}
               onChange={(event) => handleRecordPatch({ title: event.target.value })}
             />
           </label>
 
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            {t.detail.sourcePlatform}: {getPlatformLabel(draft.sourcePlatform, appLanguage)}
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            {t.detail.sourceType}: {getSourceTypeLabel(draft.sourceType, appLanguage)}
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            {t.detail.transcriptionStatus}:{" "}
-            <span className="font-medium text-slate-700">
-              {getTranscriptionStatusLabel(draft.transcriptionStatus, appLanguage)}
+          <div className="flex flex-wrap items-center gap-2" data-testid="detail-header-chips">
+            <span className={`rounded-full px-3 py-1 text-xs font-medium ${summarySignals.status.tone}`}>
+              {summarySignals.status.label}
             </span>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            {t.detail.createdAt}: {formatDateTime(draft.createdAt)}
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            {t.detail.updatedAt}: {formatDateTime(draft.updatedAt)}
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            {t.detail.originalUrl}: {draft.originalUrl || t.common.emptyValue}
+            {summarySignals.reviewLaterLabel ? (
+              <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-900 ring-1 ring-amber-200">
+                {summarySignals.reviewLaterLabel}
+              </span>
+            ) : null}
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+              {summarySignals.entryLabel}
+            </span>
+            {summarySignals.platformLabel ? (
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                {summarySignals.platformLabel}
+              </span>
+            ) : null}
           </div>
 
-          <label>
-            <span className="mb-2 block text-sm font-medium text-slate-700">{t.detail.watchedAt}</span>
-            <input
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
-              type="datetime-local"
-              value={toDateTimeLocalValue(draft.watchedAt)}
-              onChange={(event) => handleRecordPatch({ watchedAt: fromDateTimeLocalValue(event.target.value) })}
-            />
-          </label>
+          {sourceSummary.headline || sourceSummary.detail ? (
+            <div
+              className="rounded-2xl bg-slate-50/90 px-4 py-3 text-sm text-slate-600"
+              data-testid="detail-source-summary"
+            >
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                {t.detail.sourceSummary}
+              </p>
+              {sourceSummary.headline ? (
+                <p className="mt-2 text-sm font-medium text-slate-800">{sourceSummary.headline}</p>
+              ) : null}
+              {sourceSummary.detail ? (
+                <p className={`${sourceSummary.headline ? "mt-1" : "mt-2"} text-sm leading-6 text-slate-500`}>
+                  {sourceSummary.detail}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
-      </SectionCard>
+      </section>
 
-      <SectionCard title={t.detail.transcriptMetadata}>
-        {draft.transcriptMeta ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-              {t.detail.fileName}: {draft.transcriptMeta.fileName}
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-              {t.detail.fileType}: {draft.transcriptMeta.mimeType}
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-              {t.detail.duration}: {draft.transcriptMeta.duration ?? t.common.emptyValue}
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-              {t.detail.language}: {draft.transcriptMeta.language || t.common.emptyValue}
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-              {t.detail.segments}: {draft.transcriptMeta.segments?.length ?? 0}
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-              {t.detail.timestamps}: {draft.transcriptMeta.timestamps?.length ?? 0}
-            </div>
-          </div>
+      <div className="space-y-4" data-testid="detail-primary-reading-region">
+        {shouldPrioritizeAi ? (
+          <>
+            {aiPanelSection}
+            {originalContentSection}
+          </>
         ) : (
-          <p className="text-sm text-slate-500">{t.detail.noTranscriptAvailable}</p>
+          <>
+            {originalContentSection}
+            {aiPanelSection}
+          </>
         )}
-      </SectionCard>
+      </div>
 
-      <SectionCard title={t.detail.mediaAsset.title}>
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            {t.detail.mediaAsset.storageMode}: {mediaAssetDisplay.storageLabel}
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            {t.detail.mediaAsset.availability}:{" "}
-            <span className="font-medium text-slate-700">{mediaAssetDisplay.availabilityLabel}</span>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            {t.detail.fileName}: {mediaAsset.fileName || t.common.emptyValue}
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            {t.detail.fileType}: {mediaAsset.mimeType || t.common.emptyValue}
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            {t.detail.mediaAsset.fileSize}: {mediaAsset.size ?? t.common.emptyValue}
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            {t.detail.duration}: {mediaAsset.duration ?? t.common.emptyValue}
-          </div>
-        </div>
-        <p className="mt-3 text-sm text-slate-500">{mediaAssetDisplay.availabilityDescription}</p>
+      <SectionCard title={t.detail.personalNote}>
+        <textarea
+          className="min-h-32 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-7 outline-none whitespace-pre-wrap break-words"
+          placeholder={t.detail.personalNotePlaceholder}
+          value={draft.personalNote}
+          onChange={(event) => handleRecordPatch({ personalNote: event.target.value })}
+        />
       </SectionCard>
 
       <SectionCard title={t.detail.classification}>
@@ -520,124 +784,166 @@ export function DetailPane({ record, folders, tags, onAnalyze, onDeleteRecord }:
         </div>
       </SectionCard>
 
-      <SectionCard title={t.detail.originalContent}>
-        <textarea
-          className="min-h-40 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-7 outline-none"
-          placeholder={t.detail.originalContentPlaceholder}
-          value={draft.originalContent}
-          onChange={(event) => handleRecordPatch({ originalContent: event.target.value })}
-        />
-        {!draft.originalContent.trim() ? (
-          <p className="mt-3 text-sm text-amber-700">{t.common.originalContentRequired}</p>
-        ) : null}
-      </SectionCard>
+      <SectionCard title={t.detail.supportingInfo}>
+        <div className="space-y-4" data-testid="detail-supporting-info-region">
+          <div className="rounded-2xl bg-slate-50/90 px-4 py-3 text-sm text-slate-600">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              {t.detail.transcriptMetadata}
+            </p>
+            <div
+              className="mt-2 flex flex-wrap items-start justify-between gap-3"
+              data-testid="detail-transcription-status"
+            >
+              <div className="min-w-0 flex-1">
+                <p>
+                  {t.detail.transcriptionStatus}:{" "}
+                  <span className="font-medium text-slate-700">
+                    {getDisplayedTranscriptionStatusLabel(draft, appLanguage)}
+                  </span>
+                </p>
+                {draft.transcriptMeta ? (
+                  <p className="mt-1 leading-6 text-slate-500">
+                    {draft.transcriptMeta.fileName} · {draft.transcriptMeta.mimeType} · {t.detail.language}:{" "}
+                    {draft.transcriptMeta.language || t.common.emptyValue} · {t.detail.segments}:{" "}
+                    {draft.transcriptMeta.segments?.length ?? 0}
+                  </p>
+                ) : (
+                  <p className="mt-1 leading-6 text-slate-500">{t.detail.noTranscriptAvailable}</p>
+                )}
+                {showResumeTranscriptionCta ? (
+                  <p className="mt-2 text-xs text-slate-500">{t.detail.resumeTranscriptionHint}</p>
+                ) : null}
+                {resumeTranscriptionState === "error" ? (
+                  <p className="mt-2 text-xs text-rose-600">{getResumeTranscriptionErrorMessage()}</p>
+                ) : null}
+              </div>
+              {showResumeTranscriptionCta ? (
+                <button
+                  className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={resumeTranscriptionState === "loading"}
+                  onClick={() => void handleResumeTranscription()}
+                  type="button"
+                >
+                  {resumeTranscriptionState === "loading"
+                    ? t.detail.resumeTranscriptionLoading
+                    : t.detail.resumeTranscription}
+                </button>
+              ) : null}
+            </div>
+          </div>
 
-      <SectionCard
-        title={t.detail.aiPanel}
-        action={
-          <div className="flex items-center gap-2">
-            <button
-              className={`rounded-full px-3 py-1 text-xs ${
-                activeMode === "concise" ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-700"
-              }`}
-              disabled={isAnalyzePending}
-              onClick={() => handleRecordPatch({ currentMode: "concise" })}
-              type="button"
-            >
-              {t.detail.concise}
-            </button>
-            <button
-              className={`rounded-full px-3 py-1 text-xs ${
-                activeMode === "learning" ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-700"
-              }`}
-              disabled={isAnalyzePending}
-              onClick={() => handleRecordPatch({ currentMode: "learning" })}
-              type="button"
-            >
-              {t.detail.learning}
-            </button>
+          <div className="rounded-2xl bg-slate-50/90 px-4 py-3 text-sm text-slate-600">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              {t.detail.mediaAsset.title}
+            </p>
+            <div className="mt-2 space-y-1.5">
+              <p>
+                {t.detail.mediaAsset.storageMode}:{" "}
+                <span className="font-medium text-slate-700">{mediaAssetDisplay.storageLabel}</span>
+              </p>
+              <p>
+                {t.detail.mediaAsset.availability}:{" "}
+                <span className="font-medium text-slate-700">{mediaAssetDisplay.availabilityLabel}</span>
+              </p>
+              <p className="leading-6 text-slate-500">{mediaAssetDisplay.availabilityDescription}</p>
+            </div>
           </div>
-        }
-      >
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <button
-            className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
-            disabled={isAnalyzePending}
-            onClick={async () => {
-              setPendingAnalyzeMode(activeMode);
-              try {
-                await onAnalyze(draft, activeMode);
-              } finally {
-                setPendingAnalyzeMode(null);
-              }
-            }}
-            type="button"
-          >
-            {isAnalyzePending ? (
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-            ) : null}
-            {isAnalyzePending
-              ? t.detail.analyzingMode(pendingModeLabel)
-              : activeSlot
-                ? t.detail.retryAnalyze
-                : t.detail.startAnalyze}
-          </button>
-          <div className="rounded-full bg-slate-100 p-1">
-            <button
-              className={`rounded-full px-3 py-1 text-xs ${
-                aiViewMode === "preview" ? "bg-white text-slate-900 shadow-subtle" : "text-slate-600"
-              }`}
-              onClick={() => setAiViewMode("preview")}
-              type="button"
-            >
-              {t.detail.aiPreview}
-            </button>
-            <button
-              className={`rounded-full px-3 py-1 text-xs ${
-                aiViewMode === "edit" ? "bg-white text-slate-900 shadow-subtle" : "text-slate-600"
-              }`}
-              disabled={!activeSlot || showOriginalAiResult}
-              onClick={() => setAiViewMode("edit")}
-              type="button"
-            >
-              {t.detail.aiEdit}
-            </button>
-          </div>
-          <label className="flex items-center gap-2 text-sm text-slate-600">
-            <input
-              checked={showOriginalAiResult}
-              onChange={(event) => setShowOriginalAiResult(event.target.checked)}
-              type="checkbox"
-            />
-            {t.detail.viewOriginal}
-          </label>
-          {activeSlot ? (
-            <span className="text-sm text-slate-500">
-              {t.detail.generatedAt}: {formatDateTime(activeSlot.generatedAt)}
-            </span>
-          ) : null}
-          {aiErrorMessage ? <span className="text-sm text-rose-600">{aiErrorMessage}</span> : null}
         </div>
-        {draft.aiStatus === "failed" && aiErrorMessage ? (
-          <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-            <p className="font-medium">{t.detail.latestAnalyzeFailed}</p>
-            <p className="mt-1">{aiErrorMessage}</p>
+      </SectionCard>
+
+      <section
+        className="rounded-3xl border border-slate-200/80 bg-white/80 px-5 py-4 shadow-subtle"
+        data-testid="detail-more-metadata"
+      >
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+          {t.detail.moreMetadata}
+        </p>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div className="rounded-2xl bg-slate-50/90 px-4 py-3 text-sm text-slate-600">
+            {t.detail.createdAt}: {formatDateTime(draft.createdAt)}
           </div>
-        ) : null}
-        {aiViewMode === "edit" ? renderAiEditor() : renderAiPreview()}
-      </SectionCard>
+          <div className="rounded-2xl bg-slate-50/90 px-4 py-3 text-sm text-slate-600">
+            {t.detail.updatedAt}: {formatDateTime(draft.updatedAt)}
+          </div>
+          <div
+            className="rounded-2xl bg-slate-50/90 px-4 py-3 text-sm text-slate-600 md:col-span-2"
+            data-testid="detail-original-url"
+          >
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                {t.detail.originalUrl}
+              </p>
+              <div
+                className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3"
+                data-testid="detail-original-url-row"
+              >
+                {originalUrl ? (
+                  <>
+                    <span className="min-w-0 truncate font-medium text-slate-700" title={originalUrl}>
+                      {originalUrlDisplay}
+                    </span>
+                    <button
+                      className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-100"
+                      onClick={() => void handleCopyOriginalUrl()}
+                      type="button"
+                    >
+                      {appLanguage === "zh-CN" ? "复制" : "Copy"}
+                    </button>
+                  </>
+                ) : (
+                  <span className="min-w-0 text-slate-500">{t.common.emptyValue}</span>
+                )}
+              </div>
+            </div>
+          </div>
+          <label className="md:col-span-2">
+            <span className="mb-2 block text-sm font-medium text-slate-700">{t.detail.watchedAt}</span>
+            <input
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none"
+              type="datetime-local"
+              value={toDateTimeLocalValue(draft.watchedAt)}
+              onChange={(event) => handleRecordPatch({ watchedAt: fromDateTimeLocalValue(event.target.value) })}
+            />
+          </label>
+        </div>
+      </section>
 
-      <SectionCard title={t.detail.personalNote}>
-        <textarea
-          className="min-h-32 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-7 outline-none"
-          placeholder={t.detail.personalNotePlaceholder}
-          value={draft.personalNote}
-          onChange={(event) => handleRecordPatch({ personalNote: event.target.value })}
-        />
-      </SectionCard>
-
-      <SectionCard title={t.detail.actions}>
-        <div className="flex flex-wrap gap-3">
+      <section
+        className="rounded-3xl border border-slate-200/80 bg-slate-100/80 px-5 py-4 shadow-subtle"
+        data-testid="detail-action-region"
+      >
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t.detail.actions}</p>
+        <div
+          className="mt-3 rounded-2xl bg-white/80 px-4 py-3"
+          data-testid="detail-action-card"
+        >
+          <div
+            className="flex flex-wrap items-start gap-3"
+            data-testid="detail-action-card-layout"
+          >
+            <div
+              className="min-w-0 flex-[1_1_16rem] break-words"
+              data-testid="detail-action-card-content"
+            >
+              <p className="text-sm font-medium leading-5 text-slate-900 break-words">{t.detail.reviewLaterLabel}</p>
+              <p className="mt-1 text-sm leading-6 text-slate-500 break-words">{t.detail.reviewLaterHint}</p>
+            </div>
+            <button
+              aria-pressed={draft.reviewLater}
+              className={`max-w-full flex-none rounded-2xl px-3 py-2 text-xs font-medium transition ${
+                draft.reviewLater
+                  ? "bg-amber-100 text-amber-900 ring-1 ring-amber-200"
+                  : "bg-white text-slate-700 ring-1 ring-slate-200"
+              }`}
+              data-testid="detail-action-card-button"
+              onClick={() => handleRecordPatch({ reviewLater: !draft.reviewLater })}
+              type="button"
+            >
+              {draft.reviewLater ? t.detail.removeFromReviewLater : t.detail.addToReviewLater}
+            </button>
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-3">
           <button
             className="rounded-2xl bg-white px-4 py-3 text-sm font-medium text-slate-700 ring-1 ring-slate-200"
             onClick={() => exportRecordToPdf(draft, currentFolderName, tags, appLanguage)}
@@ -653,7 +959,7 @@ export function DetailPane({ record, folders, tags, onAnalyze, onDeleteRecord }:
             {t.detail.deleteRecord}
           </button>
         </div>
-      </SectionCard>
+      </section>
     </section>
   );
 }

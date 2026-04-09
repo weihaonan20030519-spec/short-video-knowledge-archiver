@@ -12,8 +12,11 @@ function escapeHtml(value: string) {
     .replace(/\"/g, "&quot;");
 }
 
-function renderLines(lines: string[]) {
-  return lines.map((line) => `<li>${escapeHtml(line)}</li>`).join("");
+function renderLines(lines: Array<string | { text: string }>) {
+  return lines
+    .map((line) => ("string" === typeof line ? line : line.text))
+    .map((line) => `<li>${escapeHtml(line)}</li>`)
+    .join("");
 }
 
 function renderAiResult(record: RecordItem, language: AppLanguage) {
@@ -140,7 +143,7 @@ export async function exportRecordToPdf(
       </section>
       <section>
         <h3>${copy.originalContent}</h3>
-        <p>${escapeHtml(record.originalContent || "—")}</p>
+        <p style="white-space: pre-wrap; word-break: break-word;">${escapeHtml(record.originalContent || "—")}</p>
       </section>
       ${renderAiResult(record, language)}
       <section>
@@ -175,7 +178,7 @@ export async function exportFolderToPdf(
           <p class="meta">${copy.createdAt}: ${escapeHtml(formatDateTime(record.createdAt))}</p>
           <section>
             <h3>${copy.originalContent}</h3>
-            <p>${escapeHtml(record.originalContent || "—")}</p>
+            <p style="white-space: pre-wrap; word-break: break-word;">${escapeHtml(record.originalContent || "—")}</p>
           </section>
           ${renderAiResult(record, language)}
           <section>

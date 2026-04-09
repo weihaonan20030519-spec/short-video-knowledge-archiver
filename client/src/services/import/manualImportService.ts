@@ -11,7 +11,7 @@ const FULL_CONTENT_LENGTH = 120;
 const PARTIAL_CONTENT_LENGTH = 24;
 
 function normalizeContent(text?: string | null) {
-  return text?.replace(/\s+/g, " ").trim() || "";
+  return text?.trim() || "";
 }
 
 function isValidHttpUrl(url: string) {
@@ -42,8 +42,9 @@ export function assessContentCompleteness(text?: string | null): ImportContentCo
 }
 
 export function createManualImportResult(content: string, language: AppLanguage): ImportResult {
-  const normalizedContent = content.trim() || null;
-  const completeness = assessContentCompleteness(normalizedContent);
+  const trimmedContent = content.trim();
+  const normalizedContent = trimmedContent ? content : null;
+  const completeness = assessContentCompleteness(content);
 
   return {
     source: normalizedContent ? "manual_text" : "manual_empty",
@@ -91,4 +92,3 @@ export function createGenericLinkImportResult(
     shouldPromptManualInput: true
   };
 }
-

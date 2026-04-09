@@ -121,6 +121,7 @@ describe("ThreePaneLayout", () => {
 
     expect(grid.getAttribute("style")).not.toBe(initialColumns);
     expect(window.localStorage.getItem(WORKSPACE_LAYOUT_STORAGE_KEY)).toContain("\"sidebar\":360");
+    expect(window.localStorage.getItem(WORKSPACE_LAYOUT_STORAGE_KEY)).toContain("\"list\":280");
   });
 
   it("enforces minimum pane widths while dragging", () => {
@@ -150,5 +151,65 @@ describe("ThreePaneLayout", () => {
     fireEvent.mouseUp(window);
 
     expect(window.localStorage.getItem(WORKSPACE_LAYOUT_STORAGE_KEY)).toContain("\"list\":280");
+  });
+
+  it("keeps the right pane fixed when dragging the left splitter by redistributing width between sidebar and list", () => {
+    render(
+      <ThreePaneLayout
+        sidebar={<aside>sidebar</aside>}
+        list={<section>list</section>}
+        detail={<section>detail</section>}
+      />
+    );
+
+    const grid = screen.getByTestId("workspace-grid");
+    vi.spyOn(grid, "getBoundingClientRect").mockReturnValue({
+      width: 1500,
+      height: 900,
+      top: 0,
+      left: 0,
+      right: 1500,
+      bottom: 900,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    } as DOMRect);
+
+    fireEvent.mouseDown(screen.getByTestId("resize-handle-sidebar"), { clientX: 300 });
+    fireEvent.mouseMove(window, { clientX: 340 });
+    fireEvent.mouseUp(window);
+
+    expect(window.localStorage.getItem(WORKSPACE_LAYOUT_STORAGE_KEY)).toContain("\"sidebar\":320");
+    expect(window.localStorage.getItem(WORKSPACE_LAYOUT_STORAGE_KEY)).toContain("\"list\":320");
+  });
+
+  it("keeps the left pane fixed when dragging the right splitter by redistributing width between list and detail", () => {
+    render(
+      <ThreePaneLayout
+        sidebar={<aside>sidebar</aside>}
+        list={<section>list</section>}
+        detail={<section>detail</section>}
+      />
+    );
+
+    const grid = screen.getByTestId("workspace-grid");
+    vi.spyOn(grid, "getBoundingClientRect").mockReturnValue({
+      width: 1500,
+      height: 900,
+      top: 0,
+      left: 0,
+      right: 1500,
+      bottom: 900,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    } as DOMRect);
+
+    fireEvent.mouseDown(screen.getByTestId("resize-handle-list"), { clientX: 420 });
+    fireEvent.mouseMove(window, { clientX: 480 });
+    fireEvent.mouseUp(window);
+
+    expect(window.localStorage.getItem(WORKSPACE_LAYOUT_STORAGE_KEY)).toContain("\"sidebar\":280");
+    expect(window.localStorage.getItem(WORKSPACE_LAYOUT_STORAGE_KEY)).toContain("\"list\":420");
   });
 });

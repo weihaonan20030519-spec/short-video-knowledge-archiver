@@ -75,6 +75,32 @@ function createProcessFailureResult(
   };
 }
 
+function hasImportWarning(result: ImportResult | null, code: ImportIssueCode) {
+  return Boolean(result?.warnings.some((warning) => warning.code === code));
+}
+
+function buildImportSourceSignals(importResult: ImportResult | null): ImportSummary["sourceSignals"] {
+  if (!importResult || importResult.source !== "link_generic") {
+    return null;
+  }
+
+  const signals: NonNullable<ImportSummary["sourceSignals"]> = {};
+
+  if (importResult.linkExtractionReport?.hasHtmlText) {
+    signals.hasHtmlText = true;
+  }
+
+  if (importResult.linkExtractionReport?.hasImageOcrText) {
+    signals.hasImageOcrText = true;
+  }
+
+  if (hasImportWarning(importResult, "META_ONLY")) {
+    signals.isSummaryOnly = true;
+  }
+
+  return Object.keys(signals).length ? signals : null;
+}
+
 function normalizeImportPlatform(platform: ImportPlatform): SourcePlatform {
   if (platform === "bilibili") {
     return "bilibili";
@@ -193,8 +219,32 @@ function normalizeArticleImportWarningMessage(warning: ImportWarning, language: 
     return fallbackMessage;
   }
 
-  if (warning.code !== "OCR_NOT_ATTEMPTED" && warning.code !== "OCR_PROVIDER_UNAVAILABLE" && warning.code !== "OCR_NO_TEXT_DETECTED") {
+  if (
+    warning.code !== "OCR_NOT_ATTEMPTED" &&
+    warning.code !== "OCR_PROVIDER_UNAVAILABLE" &&
+    warning.code !== "OCR_RATE_LIMITED" &&
+    warning.code !== "OCR_SERVICE_UNAVAILABLE" &&
+    warning.code !== "OCR_BAD_REQUEST" &&
+    warning.code !== "OCR_UNKNOWN_ERROR" &&
+    warning.code !== "OCR_NO_TEXT_DETECTED"
+  ) {
     return rawMessage;
+  }
+
+  if (warning.code === "OCR_RATE_LIMITED") {
+    return fallbackMessage;
+  }
+
+  if (warning.code === "OCR_SERVICE_UNAVAILABLE") {
+    return fallbackMessage;
+  }
+
+  if (warning.code === "OCR_BAD_REQUEST") {
+    return fallbackMessage;
+  }
+
+  if (warning.code === "OCR_UNKNOWN_ERROR") {
+    return fallbackMessage;
   }
 
   const lowered = rawMessage.toLowerCase();
@@ -212,6 +262,18 @@ function normalizeArticleImportWarningMessage(warning: ImportWarning, language: 
     return language === "zh-CN"
       ? "图片文字识别部分失败：当前模型服务繁忙，请稍后重试。"
       : "Image text recognition partially failed: the model service is busy right now. Please try again later.";
+  }
+
+  if (/(429|resource_exhausted|quota exceeded|rate limit|too many requests)/i.test(rawMessage)) {
+    return language === "zh-CN"
+      ? "图片文字识别部分失败：当前请求过多，请稍后重试。"
+      : "Image text recognition partially failed because requests are being rate limited. Please try again later.";
+  }
+
+  if (/(400|bad request|invalid argument|unsupported mime|unsupported image)/i.test(rawMessage)) {
+    return language === "zh-CN"
+      ? "图片文字识别失败：当前图片格式或输入暂不被稳定支持。"
+      : "Image text recognition failed because the current image input does not look stably supported.";
   }
 
   if (/(api[_ -]?key|invalid|expired)/i.test(lowered) && looksLikeProviderPayload) {
@@ -536,6 +598,8 @@ export async function resolveImport(options: ResolveImportOptions): Promise<Impo
 }
 
 export function buildRecordImportSnapshot(importResult: ImportResult | null): RecordImportSnapshot {
+  const sourceSignals = buildImportSourceSignals(importResult);
+
   return {
     platform: normalizeImportPlatform(importResult?.platform || "unknown"),
     originalUrl: importResult?.originalUrl || null,
@@ -545,7 +609,8 @@ export function buildRecordImportSnapshot(importResult: ImportResult | null): Re
       ? {
           source: importResult.source,
           outcome: importResult.outcome,
-          contentCompleteness: importResult.contentCompleteness
+          contentCompleteness: importResult.contentCompleteness,
+          ...(sourceSignals ? { sourceSignals } : {})
         }
       : null
   };

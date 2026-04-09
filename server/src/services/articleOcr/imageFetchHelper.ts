@@ -8,11 +8,7 @@ const SUPPORTED_IMAGE_CONTENT_TYPES = new Set([
   "image/png",
   "image/jpeg",
   "image/webp",
-  "image/heic",
-  "image/heif",
-  "image/gif",
-  "image/bmp",
-  "image/tiff"
+  "image/gif"
 ]);
 
 type Fetcher = typeof fetch;
@@ -25,6 +21,30 @@ function parseContentType(contentTypeHeader: string | null) {
   return contentTypeHeader.split(";")[0].trim().toLowerCase() || null;
 }
 
+function getImageHost(imageUrl: string) {
+  try {
+    return new URL(imageUrl).hostname;
+  } catch {
+    return null;
+  }
+}
+
+function createImageFetchError(
+  code: "IMAGE_URL_BLOCKED" | "IMAGE_REDIRECT_WITHOUT_LOCATION" | "IMAGE_TOO_MANY_REDIRECTS" | "IMAGE_FETCH_FAILED" | "IMAGE_UNSUPPORTED_CONTENT_TYPE" | "IMAGE_TOO_LARGE" | "IMAGE_BODY_EMPTY",
+  imageUrl: string,
+  details: {
+    mimeType?: string | null;
+    contentLength?: number | null;
+  } = {}
+) {
+  return Object.assign(new Error(code), {
+    imageUrl,
+    imageHost: getImageHost(imageUrl),
+    mimeType: details.mimeType ?? null,
+    contentLength: details.contentLength ?? null
+  });
+}
+
 export async function fetchImageAsBase64(imageUrl: string, fetcher: Fetcher = fetch, timeoutMs = 8000) {
   let currentUrl = imageUrl;
   const controller = new AbortController();
@@ -34,7 +54,7 @@ export async function fetchImageAsBase64(imageUrl: string, fetcher: Fetcher = fe
     for (let redirectCount = 0; redirectCount <= MAX_IMAGE_REDIRECTS; redirectCount += 1) {
       const resolvedUrl = new URL(currentUrl);
       if (!ensureSafeUrl(resolvedUrl)) {
-        throw new Error("IMAGE_URL_BLOCKED");
+        throw createImageFetchError("IMAGE_URL_BLOCKED", currentUrl);
       }
 
       const response = await fetcher(currentUrl, {
@@ -49,11 +69,11 @@ export async function fetchImageAsBase64(imageUrl: string, fetcher: Fetcher = fe
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         const location = response.headers.get("location");
         if (!location) {
-          throw new Error("IMAGE_REDIRECT_WITHOUT_LOCATION");
+          throw createImageFetchError("IMAGE_REDIRECT_WITHOUT_LOCATION", currentUrl);
         }
 
         if (redirectCount >= MAX_IMAGE_REDIRECTS) {
-          throw new Error("IMAGE_TOO_MANY_REDIRECTS");
+          throw createImageFetchError("IMAGE_TOO_MANY_REDIRECTS", currentUrl);
         }
 
         currentUrl = new URL(location, currentUrl).toString();
@@ -61,21 +81,24 @@ export async function fetchImageAsBase64(imageUrl: string, fetcher: Fetcher = fe
       }
 
       if (!response.ok) {
-        throw new Error("IMAGE_FETCH_FAILED");
+        throw createImageFetchError("IMAGE_FETCH_FAILED", currentUrl);
       }
 
       const contentType = parseContentType(response.headers.get("content-type"));
       if (!contentType || !SUPPORTED_IMAGE_CONTENT_TYPES.has(contentType)) {
-        throw new Error("IMAGE_UNSUPPORTED_CONTENT_TYPE");
+        throw createImageFetchError("IMAGE_UNSUPPORTED_CONTENT_TYPE", currentUrl, { mimeType: contentType });
       }
 
       const contentLengthHeader = response.headers.get("content-length");
       if (contentLengthHeader && Number(contentLengthHeader) > MAX_IMAGE_DOWNLOAD_BYTES) {
-        throw new Error("IMAGE_TOO_LARGE");
+        throw createImageFetchError("IMAGE_TOO_LARGE", currentUrl, {
+          mimeType: contentType,
+          contentLength: Number(contentLengthHeader)
+        });
       }
 
       if (!response.body) {
-        throw new Error("IMAGE_BODY_EMPTY");
+        throw createImageFetchError("IMAGE_BODY_EMPTY", currentUrl, { mimeType: contentType });
       }
 
       const reader = response.body.getReader();
@@ -92,7 +115,10 @@ export async function fetchImageAsBase64(imageUrl: string, fetcher: Fetcher = fe
           if (value) {
             bytesRead += value.byteLength;
             if (bytesRead > MAX_IMAGE_DOWNLOAD_BYTES) {
-              throw new Error("IMAGE_TOO_LARGE");
+              throw createImageFetchError("IMAGE_TOO_LARGE", currentUrl, {
+                mimeType: contentType,
+                contentLength: bytesRead
+              });
             }
             chunks.push(value);
           }
@@ -108,7 +134,7 @@ export async function fetchImageAsBase64(imageUrl: string, fetcher: Fetcher = fe
       };
     }
 
-    throw new Error("IMAGE_TOO_MANY_REDIRECTS");
+    throw createImageFetchError("IMAGE_TOO_MANY_REDIRECTS", currentUrl);
   } finally {
     clearTimeout(timeout);
   }

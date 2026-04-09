@@ -268,6 +268,111 @@ describe("importCoordinator", () => {
     });
   });
 
+  it("preserves html and OCR source signals in the record import snapshot", () => {
+    const snapshot = buildRecordImportSnapshot({
+      source: "link_generic",
+      platform: "other",
+      outcome: "complete",
+      originalUrl: "https://example.com/article/full",
+      detectedTitle: "Article",
+      detectedContent: "完整正文",
+      contentCompleteness: "full",
+      availableTracks: [],
+      selectedTrackId: null,
+      warnings: [],
+      canCreateRecord: true,
+      shouldPromptManualInput: false,
+      linkExtractionReport: createArticleExtractionReport({
+        hasHtmlText: true,
+        hasImageOcrText: true,
+        extractionSources: ["html_text", "image_ocr"],
+        ocrStatus: "successful"
+      })
+    });
+
+    expect(snapshot.importSummary).toEqual({
+      source: "link_generic",
+      outcome: "complete",
+      contentCompleteness: "full",
+      sourceSignals: {
+        hasHtmlText: true,
+        hasImageOcrText: true
+      }
+    });
+  });
+
+  it("marks summary-only source signals only for explicit meta-only article imports", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      json: async () => ({
+        success: true,
+        data: {
+          originalUrl: "https://example.com/article/meta-only",
+          resolvedUrl: "https://example.com/article/meta-only",
+          platform: "other",
+          title: "Meta only article",
+          excerpt: "Only the summary is available.",
+          contentText: "Only the summary is available.",
+          fetchSucceeded: true,
+          extractionMethod: "meta_fallback",
+          extractionReport: createArticleExtractionReport({
+            extractionSources: ["meta_excerpt"],
+            hasHtmlText: false,
+            coverageLevel: "minimal"
+          }),
+          warnings: [
+            { code: "META_ONLY", message: "meta only" },
+            { code: "MANUAL_COMPLETION_REQUIRED", message: "manual completion required" }
+          ]
+        },
+        error: null
+      })
+    }));
+
+    const metaOnlySession = await resolveImport({
+      inputMethod: "link",
+      originalUrl: "https://example.com/article/meta-only",
+      appLanguage: "zh-CN"
+    });
+
+    expect(buildRecordImportSnapshot(metaOnlySession.result).importSummary).toEqual({
+      source: "link_generic",
+      outcome: "needs_user_input",
+      contentCompleteness: "empty",
+      sourceSignals: {
+        isSummaryOnly: true
+      }
+    });
+
+    const partialSnapshot = buildRecordImportSnapshot({
+      source: "link_generic",
+      platform: "other",
+      outcome: "partial",
+      originalUrl: "https://example.com/article/partial",
+      detectedTitle: "Article",
+      detectedContent: "正文偏短，但不是仅摘要。",
+      contentCompleteness: "partial",
+      availableTracks: [],
+      selectedTrackId: null,
+      warnings: [],
+      canCreateRecord: true,
+      shouldPromptManualInput: true,
+      linkExtractionReport: createArticleExtractionReport({
+        hasHtmlText: true,
+        hasImageOcrText: false,
+        coverageLevel: "partial"
+      })
+    });
+
+    expect(partialSnapshot.importSummary).toEqual({
+      source: "link_generic",
+      outcome: "partial",
+      contentCompleteness: "partial",
+      sourceSignals: {
+        hasHtmlText: true
+      }
+    });
+  });
+
   it("keeps html-only imports with unresolved image coverage out of the complete state", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       json: async () => ({
@@ -335,16 +440,20 @@ describe("importCoordinator", () => {
           }),
           warnings: [
             {
-              code: "OCR_PROVIDER_UNAVAILABLE",
-              message: '{"error":{"code":503,"message":"This model is currently experiencing high demand."}}'
+              code: "OCR_SERVICE_UNAVAILABLE",
+              message: "Image OCR hit a Gemini service availability issue (503 ServiceUnavailable)."
             },
             {
-              code: "OCR_NO_TEXT_DETECTED",
-              message: '{"error":{"code":"API_KEY_INVALID","message":"API key expired."}}'
+              code: "OCR_RATE_LIMITED",
+              message: "Image OCR was rate limited by Gemini (429 TooManyRequests)."
             },
             {
-              code: "OCR_NO_TEXT_DETECTED",
-              message: '{"error":{"code":500,"message":"Unexpected OCR provider failure."}}'
+              code: "OCR_BAD_REQUEST",
+              message: "Image OCR was rejected because the current image input was not accepted (400 BadRequest)."
+            },
+            {
+              code: "OCR_UNKNOWN_ERROR",
+              message: "Image OCR failed because of an unexpected provider error: API Error."
             }
           ]
         },
@@ -359,11 +468,13 @@ describe("importCoordinator", () => {
     });
 
     const messages = session.result?.warnings.map((warning) => warning.message) ?? [];
-    expect(messages).toHaveLength(3);
+    expect(messages).toHaveLength(4);
+    expect(messages[0]).toContain("图片文字识别已中断");
     expect(messages[0]).toContain("当前模型服务繁忙");
-    expect(messages[1]).toContain("Gemini 配置无效或已过期");
-    expect(messages[2]).toContain("OCR 处理出现异常");
-    expect(messages.join(" ")).not.toContain('{"error"');
+    expect(messages[1]).toContain("图片文字识别已中断");
+    expect(messages[1]).toContain("当前请求过多");
+    expect(messages[2]).toContain("图片格式或输入暂不被稳定支持");
+    expect(messages[3]).toContain("OCR 处理出现异常");
   });
 
   it("keeps multi-track imports in awaiting_track_selection and marks weak content as needs_user_input", async () => {

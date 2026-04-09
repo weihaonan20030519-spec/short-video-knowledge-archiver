@@ -16,15 +16,15 @@ export function CreateRecordResponsiveLayout({
   secondaryFields
 }: CreateRecordResponsiveLayoutProps) {
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {modeSwitcher}
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.8fr)] lg:items-start">
-        <div className="space-y-5">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.8fr)] lg:items-start">
+        <div className="space-y-4">
           {modeHint}
           {modeSection}
           {primaryFields}
         </div>
-        <div className="space-y-5">{secondaryFields}</div>
+        <div className="space-y-4">{secondaryFields}</div>
       </div>
     </div>
   );

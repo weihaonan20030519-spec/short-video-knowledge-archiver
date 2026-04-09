@@ -16,6 +16,21 @@ export function getTranscriptionStatusLabel(status: TranscriptionStatus, languag
   return getMessages(language).transcriptionStatus[status];
 }
 
+function hasSourceContent(record: Pick<RecordItem, "originalContent">) {
+  return Boolean(record.originalContent.trim());
+}
+
+export function getDisplayedTranscriptionStatusLabel(
+  record: Pick<RecordItem, "originalContent" | "transcriptionStatus">,
+  language: AppLanguage = "zh-CN"
+) {
+  if (record.transcriptionStatus === "idle" && hasSourceContent(record)) {
+    return getMessages(language).detail.transcriptionStatusReadyToOrganize;
+  }
+
+  return getTranscriptionStatusLabel(record.transcriptionStatus, language);
+}
+
 export const transcriptionStatusToneMap: Record<TranscriptionStatus, string> = {
   idle: "bg-slate-200 text-slate-700 ring-1 ring-slate-300/80",
   file_uploaded: "bg-sky-100 text-sky-800 ring-1 ring-sky-200",
@@ -41,12 +56,18 @@ interface RecordListStatusPresentation {
   tone: string;
 }
 
-function hasAiOutput(record: Pick<RecordItem, "aiOutputs">) {
-  return Boolean(record.aiOutputs.concise || record.aiOutputs.learning);
+export type SidebarStatusFilterKey = "unorganized" | "not_started" | "needs_review" | "review_later";
+
+interface SidebarFilterPresentation {
+  key: SidebarStatusFilterKey;
+  label: string;
+  emptyTitle: string;
+  emptyDescription: string;
+  matchesRecord: (record: RecordItem) => boolean;
 }
 
-function hasSourceContent(record: Pick<RecordItem, "originalContent">) {
-  return Boolean(record.originalContent.trim());
+function hasAiOutput(record: Pick<RecordItem, "aiOutputs">) {
+  return Boolean(record.aiOutputs.concise || record.aiOutputs.learning);
 }
 
 function isTranscriptionInProgress(status: TranscriptionStatus) {
@@ -136,9 +157,13 @@ export function getRecordListStatus(record: RecordItem, language: AppLanguage = 
 
 export function matchesRecordStageFilter(
   record: RecordItem,
-  filter: "all" | "recent" | "unorganized" | "needs_review"
+  filter: "all" | "recent" | "unorganized" | "not_started" | "needs_review"
 ) {
   const key = deriveRecordListStatusKey(record);
+
+  if (filter === "not_started") {
+    return key === "not_started";
+  }
 
   if (filter === "needs_review") {
     return key === "needs_review";
@@ -155,4 +180,46 @@ export function matchesRecordStageFilter(
   }
 
   return true;
+}
+
+export function getSidebarFilterPresentation(
+  filter: SidebarStatusFilterKey,
+  language: AppLanguage = "zh-CN"
+): SidebarFilterPresentation {
+  const messages = getMessages(language);
+
+  switch (filter) {
+    case "needs_review":
+      return {
+        key: filter,
+        label: messages.sidebar.filters.needsReview,
+        emptyTitle: messages.empty.needsReviewTitle,
+        emptyDescription: messages.empty.needsReviewDescription,
+        matchesRecord: (record) => matchesRecordStageFilter(record, "needs_review")
+      };
+    case "not_started":
+      return {
+        key: filter,
+        label: messages.transcriptionStatus.idle,
+        emptyTitle: messages.empty.notStartedTitle,
+        emptyDescription: messages.empty.notStartedDescription,
+        matchesRecord: (record) => matchesRecordStageFilter(record, "not_started")
+      };
+    case "review_later":
+      return {
+        key: filter,
+        label: messages.sidebar.filters.reviewLater,
+        emptyTitle: messages.empty.reviewLaterTitle,
+        emptyDescription: messages.empty.reviewLaterDescription,
+        matchesRecord: (record) => record.reviewLater
+      };
+    default:
+      return {
+        key: "unorganized",
+        label: messages.sidebar.filters.unorganized,
+        emptyTitle: messages.empty.unorganizedTitle,
+        emptyDescription: messages.empty.unorganizedDescription,
+        matchesRecord: (record) => matchesRecordStageFilter(record, "unorganized")
+      };
+  }
 }

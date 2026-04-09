@@ -99,11 +99,13 @@ export function buildCreateRecordDraft(input: {
     inputMethod === "link"
       ? resolveOriginalUrl(input.values.originalUrl, importSnapshot.originalUrl)
       : null;
+  const userContent = input.values.content ?? "";
   const originalContent =
-    input.values.content?.trim() ||
-    input.transcriptionResult?.transcriptText ||
-    importSnapshot.detectedContent ||
-    "";
+    userContent.trim()
+      ? userContent
+      : input.transcriptionResult?.transcriptText ||
+        importSnapshot.detectedContent ||
+        "";
   const sourcePlatform =
     inputMethod === "link"
       ? resolveSourcePlatform(originalUrl, importSnapshot.platform)

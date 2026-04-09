@@ -1,11 +1,17 @@
 import { screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { recordRepository } from "../db/repositories/recordRepository";
 import { APP_LANGUAGE_STORAGE_KEY } from "../lib/i18n";
 import { useSettingsStore } from "../stores/settingsStore";
 import { renderApp } from "../test/utils";
 import { createFolder, createRecord, createTag } from "../test/factories";
+
+afterEach(() => {
+  useSettingsStore.getState().setAppLanguage("zh-CN");
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 async function openFolderCreateModal() {
   const { user } = await renderApp();
@@ -109,7 +115,7 @@ describe("HomePage interactions", () => {
     expect(contentField.value).toContain("先明确目标");
     expect(contentField.value).toContain("更适合直接进入 AI 整理");
     expect(screen.getByLabelText("字幕轨道")).toBeInTheDocument();
-    expect(screen.getByText("检测到多条字幕轨，可选择导入其中一条。")).toBeInTheDocument();
+    expect(screen.queryByText("检测到多条字幕轨，可选择导入其中一条。")).not.toBeInTheDocument();
   });
 
   it("allows choosing another bilibili subtitle track when multiple tracks are detected", async () => {
@@ -736,6 +742,254 @@ describe("HomePage interactions", () => {
     expect(screen.getByText("尚未归档到任何文件夹的内容会显示在这里")).toBeInTheDocument();
   });
 
+  it("filters review-later records through a dedicated sidebar entry without affecting needs review", async () => {
+    const reviewLaterRecord = createRecord({
+      id: "record-review-later",
+      title: "之后再补的记录",
+      reviewLater: true,
+      originalContent: " ",
+      contentCompleteness: "none",
+      transcriptionStatus: "idle"
+    });
+    const needsReviewRecord = createRecord({
+      id: "record-needs-review",
+      title: "当前待修正文稿",
+      reviewLater: false,
+      originalContent: "这里已经有原文，但还没整理。",
+      transcriptionStatus: "idle"
+    });
+
+    const { user } = await renderApp({
+      records: [reviewLaterRecord, needsReviewRecord]
+    });
+
+    await user.click(screen.getByRole("button", { name: "需复查" }));
+
+    expect(await screen.findByText("之后再补的记录")).toBeInTheDocument();
+    expect(screen.queryByText("当前待修正文稿")).not.toBeInTheDocument();
+    expect(screen.getByTestId("record-list-card-primary-signal")).toHaveTextContent("未开始");
+    const reviewLaterSummary = screen.getByTestId("record-list-summary-chips");
+    expect(reviewLaterSummary).toHaveTextContent("需复查");
+    expect(screen.getByTestId("record-list-review-later-chip")).toHaveClass("bg-slate-50", "text-slate-500");
+
+    await user.click(screen.getByRole("button", { name: "展开子状态" }));
+    expect(screen.getByRole("button", { name: "待修正文稿" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "待修正文稿" }));
+
+    expect(await screen.findByText("当前待修正文稿")).toBeInTheDocument();
+    expect(screen.queryByText("之后再补的记录")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("record-list-primary-pill")).not.toBeInTheDocument();
+    expect(screen.getByTestId("record-list-card-contextual-status")).toHaveTextContent("待修正文稿");
+  });
+
+  it("uses the pending sidebar bucket as a broad filter while the list keeps specific status explanations", async () => {
+    const notStartedRecord = createRecord({
+      id: "record-not-started",
+      title: "完全未开始的记录",
+      originalContent: " ",
+      transcriptionStatus: "idle",
+      aiStatus: "not_started",
+      aiOutputs: { concise: null, learning: null }
+    });
+    const needsReviewRecord = createRecord({
+      id: "record-needs-review-sidebar",
+      title: "待修正文稿记录",
+      originalContent: "这里已经有正文，但还没整理。",
+      transcriptionStatus: "idle",
+      aiStatus: "not_started",
+      aiOutputs: { concise: null, learning: null }
+    });
+    const failedRecord = createRecord({
+      id: "record-failed-sidebar",
+      title: "转写失败记录",
+      originalContent: " ",
+      transcriptionStatus: "transcript_failed",
+      aiStatus: "not_started",
+      aiOutputs: { concise: null, learning: null }
+    });
+    const organizedRecord = createRecord({
+      id: "record-organized-sidebar",
+      title: "已整理记录",
+      aiStatus: "done",
+      aiOutputs: {
+        concise: {
+          mode: "concise",
+          generatedAt: "2026-04-01T00:00:00.000Z",
+          lastEditedAt: null,
+          version: 1,
+          originalResult: { summary: "完成摘要", bullets: [] },
+          currentResult: { summary: "完成摘要", bullets: [] }
+        },
+        learning: null
+      }
+    });
+
+    const { user } = await renderApp({
+      records: [notStartedRecord, needsReviewRecord, failedRecord, organizedRecord]
+    });
+
+    await user.click(screen.getByRole("button", { name: "待处理" }));
+
+    expect(await screen.findByText("完全未开始的记录")).toBeInTheDocument();
+    expect(screen.getByText("待修正文稿记录")).toBeInTheDocument();
+    expect(screen.getByText("转写失败记录")).toBeInTheDocument();
+    expect(screen.queryByText("已整理记录")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "未开始" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "待修正文稿" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "展开子状态" }));
+    expect(screen.getByRole("button", { name: "收起子状态" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "未开始" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "待修正文稿" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "未开始" }));
+
+    expect(await screen.findByText("完全未开始的记录")).toBeInTheDocument();
+    expect(screen.queryByText("待修正文稿记录")).not.toBeInTheDocument();
+    expect(screen.queryByText("转写失败记录")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "未开始" })).toHaveClass("bg-slate-100", "text-slate-950");
+
+    await user.click(screen.getByRole("button", { name: "待修正文稿" }));
+
+    expect(screen.queryByText("完全未开始的记录")).not.toBeInTheDocument();
+    expect(await screen.findByText("待修正文稿记录")).toBeInTheDocument();
+    expect(screen.queryByText("转写失败记录")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("record-list-primary-pill")).not.toBeInTheDocument();
+    expect(screen.getByTestId("record-list-card-contextual-status")).toHaveTextContent("待修正文稿");
+  });
+
+  it("lets the child filter be opened independently from the parent filter", async () => {
+    const needsReviewRecord = createRecord({
+      id: "record-needs-review-sidebar-child",
+      title: "待修正文稿记录",
+      originalContent: "这里已经有正文，但还没整理。",
+      transcriptionStatus: "idle",
+      aiStatus: "not_started",
+      aiOutputs: { concise: null, learning: null }
+    });
+
+    const { user } = await renderApp({
+      records: [needsReviewRecord]
+    });
+
+    expect(screen.queryByRole("button", { name: "待修正文稿" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "未开始" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "展开子状态" }));
+    expect(await screen.findByRole("button", { name: "未开始" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "待修正文稿" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "待修正文稿" }));
+
+    expect(await screen.findByText("待修正文稿记录")).toBeInTheDocument();
+  });
+
+  it("keeps the child filter hidden until the bucket is expanded", async () => {
+    const reviewLaterRecord = createRecord({
+      id: "record-review-later",
+      title: "之后再补的记录",
+      reviewLater: true,
+      originalContent: " ",
+      contentCompleteness: "none",
+      transcriptionStatus: "idle"
+    });
+
+    const { user } = await renderApp({
+      records: [reviewLaterRecord]
+    });
+
+    await user.click(screen.getByRole("button", { name: "待处理" }));
+
+    expect(screen.queryByRole("button", { name: "待修正文稿" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "未开始" })).not.toBeInTheDocument();
+  });
+
+  it("resumes an idle link record without creating a duplicate record", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: async () => ({
+        success: true,
+        data: {
+          originalUrl: "https://example.com/article/resume-me",
+          resolvedUrl: "https://example.com/article/resume-me",
+          platform: "other",
+          title: "恢复导入的文章",
+          excerpt: "恢复时拿到的摘要。",
+          contentText:
+            "这是恢复导入后拿到的一段正文内容，会直接回填到当前记录，而不是创建一条新的重复记录。这里继续补充更多上下文、步骤说明和注意事项，让内容稳定超过最小正文阈值。",
+          fetchSucceeded: true,
+          extractionMethod: "readability",
+          extractionReport: {
+            extractionSources: ["html_text"],
+            hasHtmlText: true,
+            hasImageOcrText: false,
+            htmlTextLength: 136,
+            imageSignalsFound: 0,
+            candidateImagesSelected: 0,
+            ocrAttemptLimit: 3,
+            candidateSelectionReasons: [],
+            imageOcrAttempted: 0,
+            imageOcrSucceeded: 0,
+            imageOcrTextLength: 0,
+            ocrStatus: "not_applicable",
+            coverageLevel: "full"
+          },
+          warnings: []
+        },
+        error: null
+      })
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resumableRecord = createRecord({
+      id: "record-resume-existing",
+      title: "误点创建后的链接记录",
+      inputMethod: "link",
+      sourceType: "link",
+      sourcePlatform: "other",
+      originalUrl: "https://example.com/article/resume-me",
+      originalContent: " ",
+      transcriptionStatus: "idle",
+      contentCompleteness: "none"
+    });
+
+    const { user } = await renderApp({
+      records: [resumableRecord]
+    });
+
+    expect(await screen.findByRole("button", { name: "继续转写" })).toBeInTheDocument();
+    expect(screen.getByText("将复用已保存链接，无需重新输入。")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "继续转写" }));
+
+    await waitFor(async () => {
+      const records = await recordRepository.listAll();
+      expect(records).toHaveLength(1);
+      expect(records[0]?.id).toBe("record-resume-existing");
+      expect(records[0]?.originalContent).toContain("恢复导入后拿到的一段正文内容");
+      expect(records[0]?.importSummary).toEqual({
+        source: "link_generic",
+        outcome: "complete",
+        contentCompleteness: "full",
+        sourceSignals: {
+          hasHtmlText: true
+        }
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("detail-transcription-status")).toHaveTextContent("转写状态: 待整理");
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3001/api/import/article",
+      expect.objectContaining({
+        body: JSON.stringify({
+          url: "https://example.com/article/resume-me"
+        })
+      })
+    );
+  });
+
   it("moves deleted folder records into uncategorized records", async () => {
     const deletableFolder = createFolder({ id: "folder-to-delete", name: "待删除文件夹", sortOrder: 1 });
     const movedRecord = createRecord({
@@ -749,9 +1003,10 @@ describe("HomePage interactions", () => {
       records: [movedRecord]
     });
 
-    const folderCard = (await screen.findByText("待删除文件夹")).closest("div");
-    expect(folderCard).not.toBeNull();
-    await user.click(within(folderCard as HTMLElement).getByRole("button", { name: "删除" }));
+    const folderCard = await screen.findByRole("button", { name: "待删除文件夹" });
+    const folderCardContainer = folderCard.closest("div");
+    expect(folderCardContainer).not.toBeNull();
+    await user.click(within(folderCardContainer as HTMLElement).getByRole("button", { name: "删除" }));
     await user.click(await screen.findByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {

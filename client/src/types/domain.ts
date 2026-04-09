@@ -125,6 +125,7 @@ export interface RecordItem {
   lastViewedAt: string | null;
   originalContent: string;
   personalNote: string;
+  reviewLater: boolean;
   transcriptionStatus: TranscriptionStatus;
   contentCompleteness: ContentCompleteness;
   transcriptMeta?: TranscriptMeta | null;

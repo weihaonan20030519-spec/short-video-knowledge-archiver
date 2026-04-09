@@ -19,6 +19,7 @@ import { recordRepository } from "../db/repositories/recordRepository";
 import { tagRepository } from "../db/repositories/tagRepository";
 import { analyzeRecord } from "../services/aiService";
 import type { CreateRecordDraft } from "../features/create-record/buildCreateRecordDraft";
+import { buildRecordImportSnapshot, resolveImport } from "../services/import/importCoordinator";
 import { isDuplicateFolderName, isDuplicateTagName, normalizeCollectionName } from "../lib/collection";
 import { createConciseAiSlot, createLearningAiSlot } from "../lib/aiTransform";
 import { exportFolderToPdf } from "../lib/exportPdf";
@@ -28,6 +29,8 @@ import {
   UNCATEGORIZED_RECORDS_VIEW_ID
 } from "../lib/folders";
 import { getAnalyzeErrorMessage } from "../lib/i18n";
+import { getSidebarFilterPresentation } from "../lib/status";
+import { canResumeTranscription } from "../lib/transcriptionResume";
 import type {
   AnalyzeMode,
   ConciseOutput,
@@ -36,6 +39,7 @@ import type {
   RecordItem,
   Tag
 } from "../types/domain";
+import type { ResumeTranscriptionOutcome } from "../lib/transcriptionResume";
 
 type CollectionModalState =
   | { entity: "folder"; mode: "create"; target: null }
@@ -52,10 +56,11 @@ type ConfirmState =
 
 function buildEmptyState(
   languageText: ReturnType<typeof useAppI18n>["t"],
+  language: ReturnType<typeof useAppI18n>["appLanguage"],
   searchQuery: string,
   selectedFolderId: string | null,
   selectedTagId: string | null,
-  activeFilter: "all" | "recent" | "unorganized" | "needs_review"
+  activeFilter: "all" | "recent" | "unorganized" | "not_started" | "needs_review" | "review_later"
 ) {
   if (searchQuery.trim()) {
     return {
@@ -86,17 +91,23 @@ function buildEmptyState(
   }
 
   if (activeFilter === "unorganized") {
-    return {
-      title: languageText.empty.unorganizedTitle,
-      description: languageText.empty.unorganizedDescription
-    };
+    const presentation = getSidebarFilterPresentation("unorganized", language);
+    return { title: presentation.emptyTitle, description: presentation.emptyDescription };
+  }
+
+  if (activeFilter === "not_started") {
+    const presentation = getSidebarFilterPresentation("not_started", language);
+    return { title: presentation.emptyTitle, description: presentation.emptyDescription };
   }
 
   if (activeFilter === "needs_review") {
-    return {
-      title: languageText.empty.needsReviewTitle,
-      description: languageText.empty.needsReviewDescription
-    };
+    const presentation = getSidebarFilterPresentation("needs_review", language);
+    return { title: presentation.emptyTitle, description: presentation.emptyDescription };
+  }
+
+  if (activeFilter === "review_later") {
+    const presentation = getSidebarFilterPresentation("review_later", language);
+    return { title: presentation.emptyTitle, description: presentation.emptyDescription };
   }
 
   return {
@@ -140,7 +151,7 @@ export function HomePage() {
     }
   }, [selectedRecord?.id]);
 
-  const emptyState = buildEmptyState(t, searchQuery, selectedFolderId, selectedTagId, activeFilter);
+  const emptyState = buildEmptyState(t, appLanguage, searchQuery, selectedFolderId, selectedTagId, activeFilter);
 
   const normalizedFolders = folders;
   const normalizedTags = tags;
@@ -182,6 +193,7 @@ export function HomePage() {
       lastViewedAt: null,
       originalContent: draft.originalContent,
       personalNote: "",
+      reviewLater: false,
       transcriptionStatus: draft.transcriptionStatus,
       contentCompleteness: draft.contentCompleteness,
       transcriptMeta: draft.transcriptMeta,
@@ -252,6 +264,51 @@ export function HomePage() {
       },
       updatedAt: new Date().toISOString()
     });
+  };
+
+  const handleResumeTranscription = async (record: RecordItem): Promise<ResumeTranscriptionOutcome> => {
+    if (!canResumeTranscription(record) || !record.originalUrl) {
+      return { status: "failed", reason: "no_import_result" };
+    }
+
+    try {
+      const session = await resolveImport({
+        inputMethod: "link",
+        originalUrl: record.originalUrl,
+        appLanguage
+      });
+
+      if (!session.result) {
+        return { status: "failed", reason: "no_import_result" };
+      }
+
+      const snapshot = buildRecordImportSnapshot(session.result);
+      const patch: Partial<RecordItem> = {
+        originalUrl: snapshot.originalUrl ?? record.originalUrl,
+        sourcePlatform:
+          snapshot.platform !== "unknown" ? snapshot.platform : record.sourcePlatform,
+        importSummary: snapshot.importSummary,
+        updatedAt: new Date().toISOString()
+      };
+
+      const detectedContent = session.result.detectedContent?.trim();
+      if (detectedContent) {
+        patch.originalContent = detectedContent;
+        patch.contentCompleteness =
+          session.result.contentCompleteness === "empty"
+            ? "none"
+            : session.result.contentCompleteness;
+      }
+
+      await recordRepository.update(record.id, patch);
+      if (!detectedContent) {
+        return { status: "failed", reason: "no_detected_content" };
+      }
+
+      return { status: "patched" };
+    } catch {
+      return { status: "failed", reason: "request_failed" };
+    }
   };
 
   const handleDeleteRecord = async (record: RecordItem) => {
@@ -439,6 +496,7 @@ export function HomePage() {
             records={filteredRecords}
             folders={normalizedFolders}
             tags={normalizedTags}
+            activeFilter={activeFilter}
             selectedRecordId={selectedRecordId}
             emptyTitle={emptyState.title}
             emptyDescription={emptyState.description}
@@ -451,6 +509,7 @@ export function HomePage() {
             folders={normalizedFolders}
             tags={normalizedTags}
             onAnalyze={handleAnalyze}
+            onResumeTranscription={handleResumeTranscription}
             onDeleteRecord={handleDeleteRecord}
           />
         }

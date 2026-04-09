@@ -1,5 +1,6 @@
 import type { Folder, RecordItem, Tag } from "../../types/domain";
 import { useAppI18n } from "../../hooks/useAppI18n";
+import type { ActiveFilter } from "../../stores/queryStore";
 import { EmptyState } from "../common/EmptyState";
 import { RecordListItem } from "./RecordListItem";
 
@@ -7,6 +8,7 @@ interface RecordListPaneProps {
   records: RecordItem[];
   folders: Folder[];
   tags: Tag[];
+  activeFilter: ActiveFilter;
   selectedRecordId: string | null;
   emptyTitle: string;
   emptyDescription: string;
@@ -17,6 +19,7 @@ export function RecordListPane({
   records,
   folders,
   tags,
+  activeFilter,
   selectedRecordId,
   emptyTitle,
   emptyDescription,
@@ -44,6 +47,7 @@ export function RecordListPane({
               record={record}
               folders={folders}
               tags={tags}
+              activeFilter={activeFilter}
               selected={selectedRecordId === record.id}
               onClick={() => onSelectRecord(record.id)}
             />

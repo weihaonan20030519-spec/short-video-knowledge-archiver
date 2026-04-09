@@ -2,7 +2,10 @@ import type { MessageDictionary } from "../../../lib/i18n";
 import { getImportUiMessages } from "../../../lib/i18n";
 import type { AppLanguage } from "../../../types/domain";
 import type { ImportResult, ImportTrack } from "../../../services/import/importTypes";
-import type { PasteLinkImportUiState } from "../../../features/create-record/createRecordImportUi";
+import {
+  getVisibleImportWarnings,
+  type PasteLinkImportUiState
+} from "../../../features/create-record/createRecordImportUi";
 
 interface CreateRecordLinkSectionProps {
   t: MessageDictionary;
@@ -39,15 +42,15 @@ export function CreateRecordLinkSection({
   const importText = getImportUiMessages(appLanguage);
   const showTrackSelector = trackOptions.length > 1;
   const showStatusPanel = hasAttemptedImport && (primaryMessage || helperMessage || importResult);
-  const visibleWarnings = importResult?.warnings.filter((warning) => warning.message.trim()) ?? [];
+  const visibleWarnings = getVisibleImportWarnings(importResult, appLanguage);
   const showImportResultPanel = Boolean(importResult && (showTrackSelector || visibleWarnings.length > 0));
 
   return (
-    <div className="space-y-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4">
+    <div className="space-y-2 rounded-[24px] border border-slate-200 bg-slate-50/90 px-4 py-3">
       <div className="flex items-start justify-between gap-3">
         <div className="text-sm text-slate-600">
           <p className="font-medium text-slate-900">{t.modals.linkImport.title}</p>
-          <p className="mt-1 leading-6">{t.modals.linkImport.description}</p>
+          <p className="mt-0.5 text-xs leading-5 text-slate-500">{t.modals.linkImport.description}</p>
         </div>
         <button
           className="shrink-0 rounded-2xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
@@ -60,46 +63,54 @@ export function CreateRecordLinkSection({
       </div>
 
       {showStatusPanel ? (
-        <div className="space-y-2">
+        <div
+          className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-600"
+          data-testid="link-import-result-panel"
+        >
           {primaryMessage ? (
             <p aria-live="polite" className={`rounded-2xl border px-3 py-2 text-xs leading-6 ${statusTone}`}>
               {primaryMessage}
             </p>
           ) : null}
 
-          {helperMessage ? <p className="px-1 text-xs leading-6 text-slate-500">{helperMessage}</p> : null}
+          {helperMessage ? (
+            <p className="mt-2 px-1 text-xs leading-6 text-slate-500" data-testid="link-import-helper-message">
+              {helperMessage}
+            </p>
+          ) : null}
 
-          {showImportResultPanel ? (
-            <div className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600">
-              {showTrackSelector ? (
-                <label className="block">
-                  <span className="mb-2 block font-medium text-slate-700">
-                    {t.modals.bilibiliImport.trackSelectLabel}
-                  </span>
-                  <select
-                    aria-label={t.modals.bilibiliImport.trackSelectLabel}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none"
-                    value={selectedTrackId}
-                    onChange={(event) => onTrackChange(event.target.value || null)}
-                  >
-                    {!selectedTrackId ? <option value="">{importText.selectTrackPlaceholder}</option> : null}
-                    {trackOptions.map((track) => (
-                      <option key={track.id} value={track.id}>
-                        {track.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
+          {showImportResultPanel && showTrackSelector ? (
+            <label className={`${primaryMessage || helperMessage ? "mt-2" : ""} block`}>
+              <span className="mb-2 block font-medium text-slate-700">
+                {t.modals.bilibiliImport.trackSelectLabel}
+              </span>
+              <select
+                aria-label={t.modals.bilibiliImport.trackSelectLabel}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none"
+                value={selectedTrackId}
+                onChange={(event) => onTrackChange(event.target.value || null)}
+              >
+                {!selectedTrackId ? <option value="">{importText.selectTrackPlaceholder}</option> : null}
+                {trackOptions.map((track) => (
+                  <option key={track.id} value={track.id}>
+                    {track.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
 
-              {visibleWarnings.length ? (
-                <div className={`${showTrackSelector ? "mt-3" : ""} rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-5 text-slate-600`}>
-                  <p className="font-medium text-slate-700">{importText.warningsTitle}</p>
-                  {visibleWarnings.map((warning) => (
-                    <p key={warning.code}>{warning.message}</p>
-                  ))}
-                </div>
-              ) : null}
+          {showImportResultPanel && visibleWarnings.length ? (
+            <div
+              className={`${primaryMessage || helperMessage || showTrackSelector ? "mt-2" : ""} rounded-xl bg-amber-50/70 px-3 py-2 text-[11px] leading-5 text-amber-900 ring-1 ring-inset ring-amber-100`}
+              data-testid="link-import-warning-group"
+            >
+              <p className="font-medium text-amber-950">{importText.warningsTitle}</p>
+              {visibleWarnings.map((warning) => (
+                <p key={warning.code} className="mt-1 first:mt-0">
+                  {warning.message}
+                </p>
+              ))}
             </div>
           ) : null}
         </div>

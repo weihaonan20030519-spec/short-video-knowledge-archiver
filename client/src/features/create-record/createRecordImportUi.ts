@@ -1,4 +1,4 @@
-import { getImportUiMessages, type MessageDictionary } from "../../lib/i18n";
+import { getImportIssueMessage, getImportUiMessages, type MessageDictionary } from "../../lib/i18n";
 import type { AppLanguage } from "../../types/domain";
 import type {
   ImportResult,
@@ -29,6 +29,63 @@ export interface PasteLinkImportSummary {
   hasImageCoverageGap: boolean;
   isLikelyIncomplete: boolean;
   shouldSuggestSupplement: boolean;
+}
+
+const NON_WARNING_IMPORT_CODES = new Set([
+  "META_ONLY",
+  "OCR_NOT_ATTEMPTED",
+  "OCR_PROVIDER_UNAVAILABLE",
+  "OCR_NO_TEXT_DETECTED",
+  "MANUAL_COMPLETION_REQUIRED",
+  "MULTIPLE_TRACKS_NEED_SELECTION"
+]);
+
+function shouldSuppressImportWarning(code: ImportResult["warnings"][number]["code"]) {
+  return NON_WARNING_IMPORT_CODES.has(code);
+}
+
+function shouldUseLocalizedFallback(message: string, language: AppLanguage) {
+  if (language !== "zh-CN") {
+    return false;
+  }
+
+  return !/[\u4e00-\u9fff]/.test(message);
+}
+
+export function getVisibleImportWarnings(result: ImportResult | null, language: AppLanguage) {
+  const seenCodes = new Set<string>();
+  const seenMessages = new Set<string>();
+  const visibleWarnings =
+    result?.warnings.reduce<ImportResult["warnings"]>((accumulator, warning) => {
+      if (shouldSuppressImportWarning(warning.code)) {
+        return accumulator;
+      }
+
+      const rawMessage = warning.message.trim();
+      const message = rawMessage
+        ? shouldUseLocalizedFallback(rawMessage, language)
+          ? getImportIssueMessage(warning.code, language)
+          : rawMessage
+        : getImportIssueMessage(warning.code, language);
+
+      if (!message || seenCodes.has(warning.code) || seenMessages.has(message)) {
+        return accumulator;
+      }
+
+      seenCodes.add(warning.code);
+      seenMessages.add(message);
+      accumulator.push({
+        ...warning,
+        message
+      });
+      return accumulator;
+    }, []) ?? [];
+
+  if (visibleWarnings.length <= 1) {
+    return visibleWarnings;
+  }
+
+  return visibleWarnings.filter((warning) => warning.code !== "MANUAL_COMPLETION_REQUIRED");
 }
 
 export function hasDetectedImportContent(result: ImportResult | null) {
@@ -216,12 +273,63 @@ function hasWarning(result: ImportResult | null, code: string) {
   return Boolean(result?.warnings.some((warning) => warning.code === code));
 }
 
+export function getBrowserImportPrimaryMessage(result: ImportResult | null, language: AppLanguage) {
+  const importText = getImportUiMessages(language);
+
+  if (!result) {
+    return null;
+  }
+
+  if (result.outcome === "complete" && hasDetectedImportContent(result)) {
+    return importText.complete;
+  }
+
+  if (result.outcome === "partial" && hasDetectedImportContent(result)) {
+    return importText.partial;
+  }
+
+  if (result.outcome === "needs_user_input") {
+    return hasDetectedImportContent(result) ? importText.partial : importText.needsUserInput;
+  }
+
+  if (result.outcome === "failed_but_creatable") {
+    return importText.failedButCreatable;
+  }
+
+  return hasDetectedImportContent(result) ? importText.partial : importText.needsUserInput;
+}
+
+export function getBrowserImportHelperMessage(result: ImportResult | null, language: AppLanguage) {
+  const importText = getImportUiMessages(language);
+
+  if (!result) {
+    return null;
+  }
+
+  if (result.outcome === "complete" && hasDetectedImportContent(result)) {
+    return null;
+  }
+
+  if ((result.outcome === "partial" || result.outcome === "needs_user_input") && hasDetectedImportContent(result)) {
+    return importText.partialHelper;
+  }
+
+  if (result.outcome === "failed_but_creatable") {
+    return importText.failedHelper;
+  }
+
+  if (result.contentCompleteness === "empty" || !hasDetectedImportContent(result)) {
+    return importText.insufficientHelper;
+  }
+
+  return null;
+}
+
 function getImageGapHelperMessage(
   result: ImportResult,
   summary: PasteLinkImportSummary,
   language: AppLanguage
 ) {
-  const importText = getImportUiMessages(language);
   const report = result.linkExtractionReport;
 
   if (!report) {
@@ -230,25 +338,36 @@ function getImageGapHelperMessage(
 
   const found = summary.imageSignalsFound;
   const selected = summary.candidateImagesSelected;
-  const coverageGapPrefix = importText.ocrCoverageGapHint(found, selected);
+  const uncoveredCount = Math.max(found - selected, 0);
+  const sentences: string[] = [];
+
+  if (uncoveredCount > 0) {
+    sentences.push(
+      language === "zh-CN"
+        ? `检测到页面包含 ${found} 张图片信号，当前仅纳入 ${selected} 张正文候选图，仍有 ${uncoveredCount} 张未纳入本轮处理范围。`
+        : `${found} image signals were detected on the page. Only ${selected} body-image candidates are included in this pass, leaving ${uncoveredCount} outside the current range.`
+    );
+  }
 
   if (summary.hasImageOcrText) {
-    return `${coverageGapPrefix}${importText.ocrGapPartialSuccessHint}`;
+    return sentences.length ? sentences.join(language === "zh-CN" ? "" : " ") : null;
+  } else if (summary.ocrStatus === "not_attempted" || summary.ocrStatus === "provider_unavailable") {
+    return sentences.length ? sentences.join(language === "zh-CN" ? "" : " ") : null;
+  } else if (summary.ocrStatus === "attempted_no_text") {
+    sentences.push(
+      language === "zh-CN"
+        ? "本轮 OCR 未从已纳入的图片中提取到可用于整理的文字。"
+        : "This OCR pass did not recover text ready for organization from the included images."
+    );
+  } else if (!sentences.length) {
+    sentences.push(
+      language === "zh-CN"
+        ? "这批图片信号里可能还有未覆盖的正文内容。"
+        : "Some of these image signals may still contain body text that was not covered."
+    );
   }
 
-  if (summary.ocrStatus === "attempted_no_text") {
-    return `${coverageGapPrefix}${importText.ocrGapAttemptedNoTextHint}`;
-  }
-
-  if (summary.ocrStatus === "not_attempted") {
-    return `${coverageGapPrefix}${importText.ocrGapNotAttemptedHint}`;
-  }
-
-  if (summary.ocrStatus === "provider_unavailable") {
-    return `${coverageGapPrefix}${importText.ocrGapProviderUnavailableHint}`;
-  }
-
-  return `${coverageGapPrefix}${importText.ocrPartialSignalsHint(found, selected)}`;
+  return sentences.join(language === "zh-CN" ? "" : " ");
 }
 
 function getNonImageGapHelperMessage(
@@ -338,6 +457,10 @@ export function getPasteLinkHelperMessage(result: ImportResult | null, language:
 
   if (summary.hasImageCoverageGap) {
     return getImageGapHelperMessage(result, summary, language);
+  }
+
+  if (summary.ocrStatus === "not_attempted" || summary.ocrStatus === "provider_unavailable") {
+    return null;
   }
 
   if (summary.shouldSuggestSupplement) {

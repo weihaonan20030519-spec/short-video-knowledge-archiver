@@ -36,6 +36,10 @@ export type ImportIssueCode =
   | "META_ONLY"
   | "OCR_NOT_ATTEMPTED"
   | "OCR_PROVIDER_UNAVAILABLE"
+  | "OCR_RATE_LIMITED"
+  | "OCR_SERVICE_UNAVAILABLE"
+  | "OCR_BAD_REQUEST"
+  | "OCR_UNKNOWN_ERROR"
   | "OCR_NO_TEXT_DETECTED"
   | "MANUAL_COMPLETION_REQUIRED"
   | "COOKIE_REQUIRED_POSSIBLE"
@@ -85,10 +89,17 @@ export interface ImportWarning {
   message: string;
 }
 
+export interface ImportSourceSignals {
+  hasHtmlText?: boolean;
+  hasImageOcrText?: boolean;
+  isSummaryOnly?: boolean;
+}
+
 export interface ImportSummary {
   outcome: ImportOutcome;
   contentCompleteness: ImportContentCompleteness;
   source?: ImportSource;
+  sourceSignals?: ImportSourceSignals | null;
 }
 
 export interface ImportResult {

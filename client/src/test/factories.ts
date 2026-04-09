@@ -37,6 +37,7 @@ export function createRecord(overrides: Partial<RecordItem> = {}): RecordItem {
     lastViewedAt: overrides.lastViewedAt ?? null,
     originalContent: overrides.originalContent || "这是一段足够长的原始内容，用于测试页面交互。",
     personalNote: overrides.personalNote || "",
+    reviewLater: overrides.reviewLater ?? false,
     transcriptionStatus: overrides.transcriptionStatus || "idle",
     contentCompleteness: overrides.contentCompleteness || "full",
     transcriptMeta: overrides.transcriptMeta ?? null,

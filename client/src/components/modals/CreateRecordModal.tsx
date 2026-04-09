@@ -85,6 +85,7 @@ interface AutofillSnapshotState {
 }
 
 const BROWSER_IMPORT_FINALIZE_TIMEOUT_MS = 12_000;
+const CREATE_RECORD_CONTENT_FIELD_ID = "create-record-primary-content";
 
 function buildIdleBrowserImportState(): BrowserImportRuntimeState {
   return {
@@ -140,6 +141,17 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
     originalUrl: { lastValue: "" }
   });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const jumpToContentField = () => {
+    const contentField = document.getElementById(CREATE_RECORD_CONTENT_FIELD_ID) as HTMLTextAreaElement | null;
+
+    if (!contentField) {
+      return;
+    }
+
+    contentField.focus();
+    contentField.scrollIntoView?.({ block: "center", inline: "nearest" });
+  };
 
   const resetAutofillSnapshot = () => {
     lastAutofillSnapshotRef.current = {
@@ -218,10 +230,12 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
 
   const applyAutofill = (nextValues: { title?: string; content?: string; url?: string }) => {
     const importedTitle = nextValues.title?.trim() || "";
-    const importedContent = nextValues.content?.trim() || "";
+    const importedContent = nextValues.content ?? "";
+    const importedContentTrimmed = importedContent.trim();
     const importedUrl = nextValues.url?.trim() || "";
     const currentTitle = getValues("title")?.trim() || "";
-    const currentContent = getValues("content")?.trim() || "";
+    const currentContent = getValues("content") ?? "";
+    const currentContentTrimmed = currentContent.trim();
     const currentUrl = getValues("originalUrl")?.trim() || "";
     const previousAutofill = lastAutofillSnapshotRef.current;
 
@@ -233,9 +247,15 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
       setValue("title", importedTitle, { shouldDirty: true });
     }
 
-    if (canOverwriteAutofillField(currentContent, importedContent, previousAutofill.content.lastValue)) {
+    if (
+      canOverwriteAutofillField(currentContentTrimmed, importedContentTrimmed, previousAutofill.content.lastValue)
+    ) {
       setValue("content", importedContent, { shouldDirty: true });
-    } else if (!importedContent && currentContent && currentContent === previousAutofill.content.lastValue) {
+    } else if (
+      !importedContentTrimmed &&
+      currentContentTrimmed &&
+      currentContent === previousAutofill.content.lastValue
+    ) {
       setValue("content", "", { shouldDirty: true });
     }
 
@@ -582,6 +602,9 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
 
   const modeConfig = getCreateRecordModeConfig(uiMode);
   const importResult = importSession.result;
+  const showRepairShortcut = Boolean(
+    importResult?.shouldPromptManualInput && importResult.contentCompleteness !== "full"
+  );
   const trackOptions = importResult?.availableTracks || [];
   const selectedTrackId = preferredTrackId || importResult?.selectedTrackId || "";
   const linkImportUiState = derivePasteLinkImportUiState(importSession, hasAttemptedLinkImport);
@@ -658,11 +681,11 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
     ) : null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-hidden bg-slate-950/55 px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-[calc(env(safe-area-inset-top)+0.75rem)] backdrop-blur-sm md:items-center md:p-4">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-hidden bg-slate-950/55 px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-[calc(env(safe-area-inset-top)+0.75rem)] md:items-center md:p-4">
       <div
         aria-labelledby="create-record-modal-title"
         aria-modal="true"
-        className="flex w-full max-w-2xl flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_14px_30px_rgba(15,23,42,0.09)] max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-1.5rem)] md:max-h-[calc(100dvh-2rem)]"
+        className="flex w-full max-w-2xl flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_14px_30px_rgba(15,23,42,0.08)] max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-1.5rem)] md:max-h-[calc(100dvh-2rem)]"
         data-testid="create-record-modal-shell"
         role="dialog"
       >
@@ -677,7 +700,7 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
             </h2>
           </div>
           <button
-            className="shrink-0 rounded-xl px-2 py-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+            className="shrink-0 rounded-xl px-2 py-1 text-sm text-slate-500 hover:bg-slate-100 hover:text-slate-900"
             onClick={handleClose}
             type="button"
           >
@@ -715,7 +738,16 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
                   t={t}
                 />
               }
-              primaryFields={<CreateRecordPrimaryFields mode={uiMode} register={register} t={t} />}
+              primaryFields={
+                <CreateRecordPrimaryFields
+                  contentFieldId={CREATE_RECORD_CONTENT_FIELD_ID}
+                  mode={uiMode}
+                  onRepairShortcutClick={jumpToContentField}
+                  register={register}
+                  showRepairShortcut={showRepairShortcut}
+                  t={t}
+                />
+              }
               secondaryFields={
                 modeConfig.showSecondaryMeta ? (
                   <CreateRecordSecondaryFields

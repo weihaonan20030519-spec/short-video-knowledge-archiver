@@ -214,9 +214,10 @@ export function CreateRecordUploadSection({
     formattedModelAttempts.length > 1 &&
     formattedModelUsed != null &&
     formattedModelUsed === formattedModelAttempts.at(-1);
+  const showArchivePlaceholder = !selectedFileName;
 
   return (
-    <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+    <div className="space-y-3 rounded-[24px] border border-slate-200 bg-slate-50/90 px-4 py-3.5">
       <div>
         <p className="text-sm font-semibold text-slate-900">{t.modals.uploadTitle}</p>
         <p className="mt-1 text-sm text-slate-600">{t.modals.uploadDescription}</p>
@@ -239,20 +240,25 @@ export function CreateRecordUploadSection({
         />
       </label>
 
-      <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 px-4 py-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium text-slate-900">{t.modals.archiveModePlaceholderTitle}</p>
-            <p className="mt-1 text-xs leading-5 text-slate-600">{t.modals.archiveModePlaceholderDescription}</p>
+      {showArchivePlaceholder ? (
+        <div
+          className="rounded-xl bg-slate-100/80 px-3 py-2.5"
+          data-testid="create-record-upload-placeholder"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-medium text-slate-700">{t.modals.archiveModePlaceholderTitle}</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">{t.modals.archiveModePlaceholderDescription}</p>
+            </div>
+            <button
+              className="shrink-0 rounded-xl border border-slate-200 bg-white/90 px-3 py-1.5 text-[11px] font-medium text-slate-600"
+              type="button"
+            >
+              {t.modals.archiveModePlaceholderAction}
+            </button>
           </div>
-          <button
-            className="shrink-0 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700"
-            type="button"
-          >
-            {t.modals.archiveModePlaceholderAction}
-          </button>
         </div>
-      </div>
+      ) : null}
 
       {selectedFileName ? (
         <div
@@ -363,31 +369,43 @@ export function CreateRecordUploadSection({
               <p className="mt-1">{t.errors.youCanContinueEditingManually}</p>
             </div>
           ) : null}
-        </div>
-      ) : null}
-
-      {transcriptionResult?.transcriptMeta ? (
-        <div className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600">
-          <p className="font-medium text-slate-700">{t.modals.transcriptMetadata}</p>
-          <p>
-            {t.modals.fileName}: {transcriptionResult.transcriptMeta.fileName}
-          </p>
-          <p>
-            {t.modals.fileType}: {transcriptionResult.transcriptMeta.mimeType}
-          </p>
-          <p>
-            {t.modals.language}: {transcriptionResult.transcriptMeta.language || t.common.emptyValue}
-          </p>
-          <p>
-            {t.modals.segments}: {transcriptionResult.transcriptMeta.segments?.length ?? 0}
-          </p>
-          <p>
-            {t.modals.timestamps}: {transcriptionResult.transcriptMeta.timestamps?.length ?? 0}
-          </p>
-          {formattedModelUsed ? (
-            <p>
-              {t.modals.uploadModelUsed}: {formattedModelUsed}
-            </p>
+          {transcriptionResult?.transcriptMeta ? (
+            <div
+              className="mt-4 border-t border-white/50 pt-3 text-xs leading-5 text-slate-600"
+              data-testid="upload-metadata-group"
+            >
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                {t.modals.transcriptMetadata}
+              </p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <p>
+                  <span className="font-medium text-slate-900">{t.modals.fileName}: </span>
+                  {transcriptionResult.transcriptMeta.fileName}
+                </p>
+                <p>
+                  <span className="font-medium text-slate-900">{t.modals.fileType}: </span>
+                  {transcriptionResult.transcriptMeta.mimeType}
+                </p>
+                <p>
+                  <span className="font-medium text-slate-900">{t.modals.language}: </span>
+                  {transcriptionResult.transcriptMeta.language || t.common.emptyValue}
+                </p>
+                <p>
+                  <span className="font-medium text-slate-900">{t.modals.segments}: </span>
+                  {transcriptionResult.transcriptMeta.segments?.length ?? 0}
+                </p>
+                <p>
+                  <span className="font-medium text-slate-900">{t.modals.timestamps}: </span>
+                  {transcriptionResult.transcriptMeta.timestamps?.length ?? 0}
+                </p>
+                {formattedModelUsed ? (
+                  <p>
+                    <span className="font-medium text-slate-900">{t.modals.uploadModelUsed}: </span>
+                    {formattedModelUsed}
+                  </p>
+                ) : null}
+              </div>
+            </div>
           ) : null}
         </div>
       ) : null}
