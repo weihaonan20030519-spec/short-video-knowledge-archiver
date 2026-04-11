@@ -5,14 +5,22 @@ dotenv.config();
 
 const envSchema = z.object({
   GEMINI_API_KEY: z.string().optional(),
+  QWEN_API_KEY: z.string().optional(),
+  DASHSCOPE_API_KEY: z.string().optional(),
   GEMINI_MODEL_CONCISE: z.string().default("gemini-2.5-flash-lite"),
   GEMINI_MODEL_LEARNING: z.string().default("gemini-2.5-flash"),
+  QWEN_MODEL: z.string().optional(),
+  QWEN_PRIMARY_MODEL: z.string().optional(),
+  QWEN_FALLBACK_MODEL: z.string().optional(),
   GEMINI_MODEL_TRANSCRIPTION: z.string().default("gemini-2.5-flash"),
   ARTICLE_OCR_MODEL: z.string().default("gemini-2.5-flash"),
+  QWEN_OCR_MODEL: z.string().default("qwen-vl-ocr"),
+  QWEN_BASE_URL: z.string().url().optional(),
+  DASHSCOPE_BASE_URL: z.string().url().default("https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
   APP_ORIGIN: z.string().optional(),
   TRANSCRIPTION_PROVIDER: z.enum(["gemini"]).default("gemini"),
-  ANALYSIS_PROVIDER: z.enum(["gemini"]).default("gemini"),
-  ARTICLE_OCR_PROVIDER: z.enum(["noop", "gemini"]).default("noop"),
+  ANALYSIS_PROVIDER: z.enum(["gemini", "qwen"]).default("qwen"),
+  ARTICLE_OCR_PROVIDER: z.enum(["noop", "gemini", "qwen_ocr"]).default("gemini"),
   TRANSCRIPTION_MAX_FILE_SIZE_MB: z.coerce.number().int().positive().default(50),
   TRANSCRIPTION_RECOMMENDED_MAX_MINUTES: z.coerce.number().int().positive().default(15),
   TRANSCRIPTION_FILE_READY_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1000),
@@ -40,12 +48,31 @@ export function resolveAllowedAppOrigins() {
     .filter(Boolean);
 }
 
-export function resolveAnalyzeModel(mode: "concise" | "learning") {
+export function resolveAnalyzeModel(
+  mode: "concise" | "learning",
+  providerName: string = env.ANALYSIS_PROVIDER
+) {
+  if (providerName === "qwen") {
+    return resolveQwenAnalyzeModel();
+  }
+
+  return resolveGeminiAnalyzeModel(mode);
+}
+
+export function resolveGeminiAnalyzeModel(mode: "concise" | "learning") {
   if (mode === "concise") {
     return env.GEMINI_MODEL_CONCISE;
   }
 
   return env.GEMINI_MODEL_LEARNING;
+}
+
+export function resolveQwenAnalyzeModel(variant: "primary" | "fallback" = "primary") {
+  if (variant === "fallback") {
+    return env.QWEN_FALLBACK_MODEL || "qwen-flash";
+  }
+
+  return env.QWEN_PRIMARY_MODEL || env.QWEN_MODEL || "qwen-plus";
 }
 
 export function requireGeminiKey(feature: "analysis" | "transcription") {
@@ -54,4 +81,16 @@ export function requireGeminiKey(feature: "analysis" | "transcription") {
   }
 
   return env.GEMINI_API_KEY;
+}
+
+export function resolveDashscopeBaseUrl() {
+  return env.DASHSCOPE_BASE_URL.replace(/\/$/, "");
+}
+
+export function resolveQwenApiKey() {
+  return env.QWEN_API_KEY || env.DASHSCOPE_API_KEY || null;
+}
+
+export function resolveQwenBaseUrl() {
+  return (env.QWEN_BASE_URL || env.DASHSCOPE_BASE_URL).replace(/\/$/, "");
 }

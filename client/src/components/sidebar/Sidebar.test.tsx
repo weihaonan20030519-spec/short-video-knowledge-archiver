@@ -278,7 +278,7 @@ describe("Sidebar", () => {
     );
 
     expect(screen.getByRole("button", { name: "待处理" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "待修正文稿" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "整理待复核" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "需复查" })).toBeInTheDocument();
 
     const toggle = screen.getByRole("button", { name: "展开子状态" });
@@ -288,12 +288,12 @@ describe("Sidebar", () => {
     fireEvent.click(toggle);
     expect(screen.getByRole("button", { name: "收起子状态" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "未开始" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "待修正文稿" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "整理待复核" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "待处理" }));
     expect(screen.getByRole("button", { name: "待处理" })).toHaveClass("bg-slate-100", "text-slate-950");
     expect(screen.queryByRole("button", { name: "未开始" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "待修正文稿" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "整理待复核" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "展开子状态" })).toBeInTheDocument();
   });
 

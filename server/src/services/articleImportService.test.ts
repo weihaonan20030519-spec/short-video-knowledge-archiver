@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { importArticleContent } from "./articleImportService.js";
+import { QwenArticleOcrProvider } from "./articleOcr/qwenArticleOcrProvider.js";
 
 describe("articleImportService", () => {
   it("returns readability content when the page body is extractable", async () => {
@@ -352,6 +353,247 @@ describe("articleImportService", () => {
     expect(result.extractionReport.ocrStatus).toBe("successful");
     expect(result.extractionReport.imageOcrFailed).toBe(0);
     expect(result.extractionReport.coverageLevel).toBe("partial");
+    expect(result.contentText).toContain("This article body contains enough full text");
+    expect(result.contentText).toContain("[图片文字补充]");
+    expect(result.contentText).toContain("这是图像文字");
+  });
+
+  it("uses OCR text as content when html and excerpt are both unavailable", async () => {
+    const fetcher = vi.fn(async () =>
+      new Response(
+        `
+          <html>
+            <head>
+              <title>Image Only Note</title>
+              <meta property="og:image" content="https://cdn.example.com/page-1.jpg" />
+              <meta property="og:image" content="https://cdn.example.com/page-2.jpg" />
+            </head>
+            <body>
+              <article>
+                <div id="app"></div>
+              </article>
+            </body>
+          </html>
+        `,
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html"
+          }
+        }
+      )
+    );
+
+    const result = await importArticleContent(
+      {
+        url: "https://www.xiaohongshu.com/explore/image-only"
+      },
+      {
+        fetcher,
+        timeoutMs: 200,
+        ocrProvider: {
+          providerAvailable: true,
+          extractText: vi.fn(async () => ({
+            attempted: 2,
+            providerAvailable: true,
+            succeededCount: 2,
+            recognizedText: "[Image OCR 1]\n第一页文字\n\n[Image OCR 2]\n第二页文字",
+            recognizedTextLength: 34,
+            warnings: [],
+            imageResults: [
+              {
+                ordinal: 1,
+                imageUrl: "https://cdn.example.com/page-1.jpg",
+                source: "content" as const,
+                succeeded: true,
+                text: "第一页文字"
+              },
+              {
+                ordinal: 2,
+                imageUrl: "https://cdn.example.com/page-2.jpg",
+                source: "content" as const,
+                succeeded: true,
+                text: "第二页文字"
+              }
+            ]
+          }))
+        }
+      }
+    );
+
+    expect(result.fetchSucceeded).toBe(true);
+    expect(result.extractionMethod).toBe("meta_fallback");
+    expect(result.contentText).toContain("第一页文字");
+    expect(result.contentText).toContain("第二页文字");
+    expect(result.extractionReport.hasImageOcrText).toBe(true);
+    expect(result.extractionReport.coverageLevel).toBe("limited");
+    expect(result.warnings.map((warning) => warning.code)).not.toContain("EXTRACTION_EMPTY");
+    expect(result.warnings.map((warning) => warning.code)).not.toContain("MANUAL_COMPLETION_REQUIRED");
+  });
+
+  it("allows Qwen OCR provider output to flow into article contentText", async () => {
+    const pageFetcher = vi.fn(async () =>
+      new Response(
+        `
+          <html>
+            <head>
+              <title>Qwen OCR Note</title>
+              <meta property="og:image" content="https://cdn.example.com/qwen-1.jpg" />
+            </head>
+            <body>
+              <article>
+                <p>这是一段网页正文，但图文里还包含更多图片文字。</p>
+              </article>
+            </body>
+          </html>
+        `,
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html"
+          }
+        }
+      )
+    );
+    const qwenFetcher = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "```text\n图片补充整理内容\n```"
+              }
+            }
+          ]
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }
+      )
+    );
+
+    const result = await importArticleContent(
+      {
+        url: "https://www.xiaohongshu.com/explore/qwen-note"
+      },
+      {
+        fetcher: pageFetcher,
+        timeoutMs: 200,
+        ocrProvider: new QwenArticleOcrProvider({
+          apiKey: "dashscope-key",
+          fetcher: qwenFetcher,
+          model: "qwen-vl-ocr",
+          baseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        })
+      }
+    );
+
+    expect(result.fetchSucceeded).toBe(true);
+    expect(result.contentText).toContain("这是一段网页正文");
+    expect(result.contentText).toContain("[图片文字补充]");
+    expect(result.contentText).toContain("图片补充整理内容");
+    expect(result.extractionReport.hasImageOcrText).toBe(true);
+    expect(qwenFetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("caps xiaohongshu candidate images at 9 instead of 3", async () => {
+    const fetcher = vi.fn(async () =>
+      new Response(
+        `
+          <html>
+            <head>
+              <title>XHS Shared Note</title>
+              <meta property="og:image" content="https://cdn.example.com/xhs-1.jpg" />
+              <meta property="og:image" content="https://cdn.example.com/xhs-2.jpg" />
+              <meta property="og:image" content="https://cdn.example.com/xhs-3.jpg" />
+              <meta property="og:image" content="https://cdn.example.com/xhs-4.jpg" />
+              <meta property="og:image" content="https://cdn.example.com/xhs-5.jpg" />
+              <meta property="og:image" content="https://cdn.example.com/xhs-6.jpg" />
+              <meta property="og:image" content="https://cdn.example.com/xhs-7.jpg" />
+              <meta property="og:image" content="https://cdn.example.com/xhs-8.jpg" />
+              <meta property="og:image" content="https://cdn.example.com/xhs-9.jpg" />
+              <meta property="og:image" content="https://cdn.example.com/xhs-10.jpg" />
+            </head>
+            <body>
+              <article>
+                <p>这是一段网页正文，但页面仍明显依赖图片承载更多信息，因此需要验证小红书平台的首轮候选图 cap 已受控放量到九张。</p>
+              </article>
+            </body>
+          </html>
+        `,
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html"
+          }
+        }
+      )
+    );
+
+    const result = await importArticleContent(
+      {
+        url: "https://www.xiaohongshu.com/explore/meta-cap-images"
+      },
+      {
+        fetcher,
+        timeoutMs: 200
+      }
+    );
+
+    expect(result.extractionReport.imageSignalsFound).toBe(10);
+    expect(result.extractionReport.candidateImagesSelected).toBe(9);
+    expect(result.extractionReport.ocrAttemptLimit).toBe(9);
+    expect(result.extractionReport.candidateSelectionReasons).toEqual(
+      expect.arrayContaining(["partial_page_signals_only", "limited_by_cap"])
+    );
+  });
+
+  it("keeps non-xiaohongshu candidate cap at 3", async () => {
+    const fetcher = vi.fn(async () =>
+      new Response(
+        `
+          <html>
+            <head>
+              <title>Generic Guide</title>
+              <meta property="og:image" content="https://cdn.example.com/guide-1.jpg" />
+              <meta property="og:image" content="https://cdn.example.com/guide-2.jpg" />
+              <meta property="og:image" content="https://cdn.example.com/guide-3.jpg" />
+              <meta property="og:image" content="https://cdn.example.com/guide-4.jpg" />
+              <meta property="og:image" content="https://cdn.example.com/guide-5.jpg" />
+            </head>
+            <body>
+              <article>
+                <p>这是一篇普通网页内容，用于确认非小红书平台的首轮候选图上限仍保持不变。</p>
+              </article>
+            </body>
+          </html>
+        `,
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html"
+          }
+        }
+      )
+    );
+
+    const result = await importArticleContent(
+      {
+        url: "https://example.com/guide-cap"
+      },
+      {
+        fetcher,
+        timeoutMs: 200
+      }
+    );
+
+    expect(result.extractionReport.imageSignalsFound).toBe(5);
+    expect(result.extractionReport.candidateImagesSelected).toBe(3);
+    expect(result.extractionReport.ocrAttemptLimit).toBe(3);
+    expect(result.extractionReport.candidateSelectionReasons).toContain("limited_by_cap");
   });
 
   it("retains full coverage when only coarse image signals exist and no body candidate images are selected", async () => {
@@ -442,50 +684,4 @@ describe("articleImportService", () => {
     expect(result.warnings.map((warning) => warning.code)).toContain("OCR_PROVIDER_UNAVAILABLE");
   });
 
-  it("reports found image signals separately from selected candidate images when capped", async () => {
-    const fetcher = vi.fn(async () =>
-      new Response(
-        `
-          <html>
-            <head>
-              <title>XHS Shared Note</title>
-              <meta property="og:image" content="https://cdn.example.com/xhs-1.jpg" />
-              <meta property="og:image" content="https://cdn.example.com/xhs-2.jpg" />
-              <meta property="og:image" content="https://cdn.example.com/xhs-3.jpg" />
-              <meta property="og:image" content="https://cdn.example.com/xhs-4.jpg" />
-              <meta property="og:image" content="https://cdn.example.com/xhs-5.jpg" />
-            </head>
-            <body>
-              <article>
-                <p>这是一段网页正文，但页面仍明显依赖图片承载更多信息，因此统计需要区分发现的图片信号数和实际选中的候选正文图数量。</p>
-              </article>
-            </body>
-          </html>
-        `,
-        {
-          status: 200,
-          headers: {
-            "Content-Type": "text/html"
-          }
-        }
-      )
-    );
-
-    const result = await importArticleContent(
-      {
-        url: "https://www.xiaohongshu.com/explore/meta-cap-images"
-      },
-      {
-        fetcher,
-        timeoutMs: 200
-      }
-    );
-
-    expect(result.extractionReport.imageSignalsFound).toBe(5);
-    expect(result.extractionReport.candidateImagesSelected).toBe(3);
-    expect(result.extractionReport.ocrAttemptLimit).toBe(3);
-    expect(result.extractionReport.candidateSelectionReasons).toEqual(
-      expect.arrayContaining(["partial_page_signals_only", "limited_by_cap"])
-    );
-  });
 });

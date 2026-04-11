@@ -1,4 +1,4 @@
-import type { AnalyzeMode, AppLanguage, ConciseOutput, LearningOutput, RecordItem } from "../types/domain";
+import type { AnalyzeMode, AppLanguage, RecordItem } from "../types/domain";
 import type { AnalyzeRequestBody, AnalyzeResponse } from "../types/api";
 import { getApiBaseUrl } from "./apiBaseUrl";
 
@@ -8,7 +8,7 @@ export async function analyzeRecord(
   record: RecordItem,
   mode: AnalyzeMode,
   appLanguage: AppLanguage
-): Promise<AnalyzeResponse<ConciseOutput | LearningOutput>> {
+): Promise<AnalyzeResponse> {
   const body: AnalyzeRequestBody = {
     mode,
     appLanguage,
@@ -26,5 +26,5 @@ export async function analyzeRecord(
     body: JSON.stringify(body)
   });
 
-  return (await response.json()) as AnalyzeResponse<ConciseOutput | LearningOutput>;
+  return (await response.json()) as AnalyzeResponse;
 }

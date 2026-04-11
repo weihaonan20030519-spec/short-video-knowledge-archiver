@@ -99,6 +99,58 @@ describe("buildCreateRecordDraft", () => {
     });
   });
 
+  it("uses imported article content as the record source text when the user has not added manual content", () => {
+    const importedContent =
+      "这是正文主段，已经包含网页提取到的核心信息。\n\n[图片文字补充]\n图片里的步骤顺序：先整理目标，再拆动作，再补注意事项。";
+
+    const draft = buildCreateRecordDraft({
+      uiMode: "paste_link",
+      values: {
+        inputMethod: "link",
+        title: "",
+        originalUrl: "",
+        content: "",
+        folderId: null,
+        tagsText: ""
+      },
+      transcriptionResult: null,
+      importResult: {
+        source: "link_generic",
+        platform: "other",
+        outcome: "partial",
+        originalUrl: "https://example.com/article-with-ocr",
+        detectedTitle: "网页标题",
+        detectedContent: importedContent,
+        contentCompleteness: "partial",
+        availableTracks: [],
+        selectedTrackId: null,
+        warnings: [],
+        canCreateRecord: true,
+        shouldPromptManualInput: true,
+        linkExtractionReport: {
+          extractionSources: ["html_text", "image_ocr"],
+          hasHtmlText: true,
+          hasImageOcrText: true,
+          htmlTextLength: 56,
+          imageSignalsFound: 4,
+          candidateImagesSelected: 2,
+          ocrAttemptLimit: 9,
+          candidateSelectionReasons: ["limited_by_cap"],
+          imageOcrAttempted: 2,
+          imageOcrSucceeded: 2,
+          imageOcrFailed: 0,
+          imageOcrTextLength: 31,
+          coverageLevel: "partial",
+          ocrStatus: "successful"
+        }
+      },
+      createdAt: "2026-04-06T12:00:00.000Z"
+    });
+
+    expect(draft.originalContent).toBe(importedContent);
+    expect(draft.contentCompleteness).toBe("partial");
+  });
+
   it("prefers a non-empty trimmed user originalUrl over import snapshot originalUrl", () => {
     const draft = buildCreateRecordDraft({
       uiMode: "paste_link",

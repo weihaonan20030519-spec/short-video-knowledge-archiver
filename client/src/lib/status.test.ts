@@ -7,6 +7,7 @@ import {
   getSidebarFilterPresentation,
   matchesRecordStageFilter
 } from "./status";
+import { getMessages } from "./i18n";
 import { createRecord } from "../test/factories";
 
 describe("getRecordListStatus", () => {
@@ -29,7 +30,7 @@ describe("getRecordListStatus", () => {
       aiOutputs: { concise: null, learning: null }
     });
 
-    expect(getRecordListStatus(record, "zh-CN").label).toBe("待修正文稿");
+    expect(getRecordListStatus(record, "zh-CN").label).toBe("整理待复核");
   });
 
   it("keeps needs review above historical transcription failure when editable source text exists", () => {
@@ -40,7 +41,21 @@ describe("getRecordListStatus", () => {
       aiOutputs: { concise: null, learning: null }
     });
 
-    expect(getRecordListStatus(record, "zh-CN").label).toBe("待修正文稿");
+    expect(getRecordListStatus(record, "zh-CN").label).toBe("整理待复核");
+  });
+
+  it("keeps analyze needs review distinct from transcript needs review wording", () => {
+    const record = createRecord({
+      originalContent: "已有原文，但当前整理还需要先复核。",
+      transcriptionStatus: "idle",
+      aiStatus: "needs_review",
+      aiOutputs: { concise: null, learning: null }
+    });
+    const messages = getMessages("zh-CN");
+    const summary = getRecordListStatus(record, "zh-CN");
+
+    expect(summary.label).toBe(messages.analysisStatus.needsReview);
+    expect(summary.label).not.toBe(messages.transcriptionStatus.transcript_needs_review);
   });
 
   it("returns transcript ready when there is no AI result and no source text edge case", () => {
@@ -205,9 +220,12 @@ describe("getSidebarFilterPresentation", () => {
       aiOutputs: { concise: null, learning: null }
     });
 
+    const messages = getMessages("zh-CN");
     const summary = getSidebarFilterPresentation("needs_review", "zh-CN");
 
-    expect(summary.label).toBe("待修正文稿");
+    expect(summary.label).toBe(messages.sidebar.filters.needsReview);
+    expect(summary.label).not.toBe(messages.transcriptionStatus.transcript_needs_review);
+    expect(summary.emptyTitle).toBe(messages.empty.needsReviewTitle);
     expect(summary.matchesRecord(needsReviewRecord)).toBe(true);
     expect(summary.matchesRecord(notStartedRecord)).toBe(false);
   });

@@ -1,17 +1,23 @@
 import type { ImportSummary } from "../services/import/importTypes";
+import type {
+  AnalyzeMode as SharedAnalyzeMode,
+  AppLanguage as SharedAppLanguage,
+  ConciseOutput as SharedConciseOutput,
+  ConciseHighlights as SharedConciseHighlights,
+  HighlightTone as SharedHighlightTone,
+  LearningHighlights as SharedLearningHighlights,
+  LearningOutput as SharedLearningOutput,
+  SourcePlatform as SharedSourcePlatform,
+  TextHighlight as SharedTextHighlight
+} from "../../../shared/src/analysis/analyzeContracts";
 
-export type SourcePlatform =
-  | "tiktok"
-  | "bilibili"
-  | "xiaohongshu"
-  | "other"
-  | "unknown";
+export type SourcePlatform = SharedSourcePlatform;
 
 export type InputMethod = "upload" | "link" | "text" | "manual";
-export type AIStatus = "not_started" | "processing" | "done" | "failed";
-export type AnalyzeMode = "concise" | "learning";
-export type AppLanguage = "zh-CN" | "en";
-export type HighlightTone = "core" | "method" | "action" | "warning";
+export type AIStatus = "not_started" | "processing" | "done" | "needs_review" | "failed";
+export type AnalyzeMode = SharedAnalyzeMode;
+export type AppLanguage = SharedAppLanguage;
+export type HighlightTone = SharedHighlightTone;
 export type SourceType = "video" | "audio" | "text" | "link" | "manual";
 export type MediaAssetStorageMode = "none" | "local_archive_dir";
 export type MediaAssetAvailability =
@@ -70,36 +76,11 @@ export interface MediaAsset {
   lastKnownError: string | null;
 }
 
-export interface TextHighlight {
-  text: string;
-  tone: HighlightTone;
-}
-
-export interface ConciseHighlights {
-  summary?: TextHighlight[];
-  bullets?: TextHighlight[];
-}
-
-export interface LearningHighlights {
-  coreConclusion?: TextHighlight[];
-  logicFramework?: TextHighlight[];
-  keyDetails?: TextHighlight[];
-  reusablePoints?: TextHighlight[];
-}
-
-export interface ConciseOutput {
-  summary: string;
-  bullets: string[];
-  highlights?: ConciseHighlights;
-}
-
-export interface LearningOutput {
-  coreConclusion: string;
-  logicFramework: string[];
-  keyDetails: string[];
-  reusablePoints: string[];
-  highlights?: LearningHighlights;
-}
+export type TextHighlight = SharedTextHighlight;
+export type ConciseHighlights = SharedConciseHighlights;
+export type LearningHighlights = SharedLearningHighlights;
+export type ConciseOutput = SharedConciseOutput;
+export type LearningOutput = SharedLearningOutput;
 
 export interface AIOutputSlot<T = ConciseOutput | LearningOutput> {
   mode: AnalyzeMode;

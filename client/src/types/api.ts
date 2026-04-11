@@ -1,19 +1,26 @@
 import type {
-  AnalyzeMode,
   AppLanguage,
-  ConciseOutput,
-  LearningOutput,
   SourcePlatform,
   TranscriptSegment,
   TranscriptTimestamp
 } from "./domain";
+import type {
+  AnalyzeErrorCode,
+  AnalyzeMetaSource,
+  AnalyzeMode,
+  AnalyzeRequest,
+  AnalyzeReview,
+  AnalyzeResponse
+} from "../../../shared/src/analysis/analyzeContracts";
+export type { AnalyzeErrorCode, AnalyzeResponse } from "../../../shared/src/analysis/analyzeContracts";
 
-export type AnalyzeErrorCode =
-  | "RAW_TEXT_REQUIRED"
-  | "TEXT_TOO_SHORT"
-  | "AI_RESPONSE_INVALID"
-  | "AI_REQUEST_FAILED"
-  | "INTERNAL_ERROR";
+export interface AnalyzeFeedback {
+  recordId: string;
+  mode: AnalyzeMode;
+  generatedAt: string;
+  source?: AnalyzeMetaSource | null;
+  review: AnalyzeReview;
+}
 
 export type BilibiliImportErrorCode =
   | "INVALID_BILIBILI_URL"
@@ -86,41 +93,7 @@ export type TranscriptionStatus =
   | "transcript_needs_review"
   | "transcript_failed";
 
-export interface AnalyzeRequestBody {
-  mode: AnalyzeMode;
-  appLanguage?: AppLanguage;
-  title?: string;
-  sourcePlatform: SourcePlatform;
-  originalUrl: string | null;
-  rawText: string;
-}
-
-export interface AnalyzeSuccessResponse<T = ConciseOutput | LearningOutput> {
-  success: true;
-  data: T;
-  error: null;
-  meta: {
-    mode: AnalyzeMode;
-    generatedAt: string;
-  };
-}
-
-export interface AnalyzeFailureResponse {
-  success: false;
-  data: null;
-  error: {
-    code: AnalyzeErrorCode;
-    message: string;
-  };
-  meta: {
-    mode: AnalyzeMode;
-    generatedAt: string;
-  };
-}
-
-export type AnalyzeResponse<T = ConciseOutput | LearningOutput> =
-  | AnalyzeSuccessResponse<T>
-  | AnalyzeFailureResponse;
+export type AnalyzeRequestBody = AnalyzeRequest;
 
 export interface BilibiliImportRequestBody {
   url: string;

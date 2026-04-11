@@ -9,6 +9,7 @@ import type {
 } from "../types/domain";
 import type {
   AnalyzeErrorCode,
+  AnalyzeFeedback,
   BilibiliImportErrorCode,
   TranscriptionErrorCode
 } from "../types/api";
@@ -169,6 +170,11 @@ type Dictionary = {
       aiRefreshingNoticeDescription: (modeLabel: string) => string;
       keepPreviousResult: string;
       latestAnalyzeFailed: string;
+      reviewNoticeTitle: string;
+      reviewReasonSourceTextNeedsReview: string;
+      reviewActionEditSourceText: string;
+      reviewActionRetryAnalyze: string;
+      reviewSourceLocal: string;
       updatedJustNow: string;
       viewOriginal: string;
       generatedAt: string;
@@ -326,6 +332,7 @@ type Dictionary = {
     linkImport: {
       title: string;
       description: string;
+      idleHint: string;
       trigger: string;
       partialHelper: string;
       insufficientHelper: string;
@@ -411,6 +418,9 @@ type Dictionary = {
     noTranscriptAvailable: string;
     internalError: string;
   };
+  analysisStatus: {
+    needsReview: string;
+  };
   status: Record<AIStatus, string>;
   transcriptionStatus: Record<TranscriptionStatus, string>;
   platform: Record<SourcePlatform, string>;
@@ -447,7 +457,7 @@ export const messages: Record<AppLanguage, Dictionary> = {
         all: "全部记录",
         recent: "最近新增",
         unorganized: "待处理",
-        needsReview: "待修正文稿",
+        needsReview: "整理待复核",
         reviewLater: "需复查"
       },
       systemSection: "系统入口",
@@ -482,11 +492,11 @@ export const messages: Record<AppLanguage, Dictionary> = {
       tagTitle: "当前标签无记录",
       tagDescription: "给记录添加这个标签后，它们会出现在这里。",
       unorganizedTitle: "暂无待处理记录",
-      unorganizedDescription: "尚未开始、待修正文稿或等待处理的失败记录会显示在这里。",
+      unorganizedDescription: "尚未开始、整理待复核或等待处理的失败记录会显示在这里。",
       notStartedTitle: "暂无未开始记录",
       notStartedDescription: "尚未开始处理的记录会显示在这里。",
-      needsReviewTitle: "暂无待修正文稿",
-      needsReviewDescription: "已转写但仍待校对的记录会显示在这里。",
+      needsReviewTitle: "暂无整理待复核记录",
+      needsReviewDescription: "已有原文但当前仍需先复核再整理的记录会显示在这里。",
       reviewLaterTitle: "暂无需复查记录",
       reviewLaterDescription: "你手动加入需复查队列的记录会显示在这里。",
       allTitle: "暂无记录",
@@ -531,6 +541,11 @@ export const messages: Record<AppLanguage, Dictionary> = {
       aiRefreshingNoticeDescription: (modeLabel) => `正在生成新的${modeLabel}结果，请稍候。`,
       keepPreviousResult: "本次整理完成前，当前结果会继续保留。",
       latestAnalyzeFailed: "本次整理失败，当前结果已保留。",
+      reviewNoticeTitle: "这次先不生成整理结果",
+      reviewReasonSourceTextNeedsReview: "当前原文还不足以稳定生成这一模式的整理结果，建议先补充或澄清原文。",
+      reviewActionEditSourceText: "建议先补充原文，再重新整理。",
+      reviewActionRetryAnalyze: "可在确认原文后再次发起整理。",
+      reviewSourceLocal: "这次由本地决策先拦截，尚未调用模型。",
       updatedJustNow: "刚刚更新",
       viewOriginal: "查看 AI 原始版",
       generatedAt: "生成时间",
@@ -720,6 +735,7 @@ export const messages: Record<AppLanguage, Dictionary> = {
       linkImport: {
         title: "链接辅助导入",
         description: "提取结果、缺口和 warning 会显示在这里。",
+        idleHint: "输入链接后，可在这里查看提取结果、缺口和提示。",
         trigger: "尝试提取链接内容",
         partialHelper: "当前只拿到部分可整理文本，建议在下方继续补充原始内容。",
         insufficientHelper: "当前只拿到标题或摘要，建议在下方补充正文。",
@@ -817,10 +833,14 @@ export const messages: Record<AppLanguage, Dictionary> = {
       noTranscriptAvailable: "暂无可用转写文本。",
       internalError: "整理时出现异常，请稍后再试。"
     },
+    analysisStatus: {
+      needsReview: "整理待复核"
+    },
     status: {
       not_started: "未整理",
       processing: "整理中",
       done: "已整理",
+      needs_review: "需复核",
       failed: "整理失败"
     },
     transcriptionStatus: {
@@ -879,7 +899,7 @@ export const messages: Record<AppLanguage, Dictionary> = {
         all: "All records",
         recent: "Recently added",
         unorganized: "Needs attention",
-        needsReview: "Needs Review",
+        needsReview: "Analysis Needs Review",
         reviewLater: "Review later"
       },
       systemSection: "System",
@@ -914,11 +934,12 @@ export const messages: Record<AppLanguage, Dictionary> = {
       tagTitle: "No records with this tag",
       tagDescription: "Add this tag to records and they will appear here.",
       unorganizedTitle: "No records need attention",
-      unorganizedDescription: "Records that have not started yet, still need draft cleanup, or failed and need another pass will appear here.",
+      unorganizedDescription:
+        "Records that have not started yet, still need analysis review, or failed and need another pass will appear here.",
       notStartedTitle: "No records have not started yet",
       notStartedDescription: "Records that have not started processing yet will appear here.",
-      needsReviewTitle: "No transcripts need review",
-      needsReviewDescription: "Transcribed records that still need review will appear here.",
+      needsReviewTitle: "No analysis review records",
+      needsReviewDescription: "Records with source text that still need analysis review will appear here.",
       reviewLaterTitle: "Nothing queued for later review",
       reviewLaterDescription: "Records you manually add to the review-later queue will appear here.",
       allTitle: "No records yet",
@@ -965,6 +986,12 @@ export const messages: Record<AppLanguage, Dictionary> = {
         `A new ${modeLabel} result is being generated. Please wait a moment.`,
       keepPreviousResult: "The previous result stays visible while this request runs.",
       latestAnalyzeFailed: "The latest analysis failed. Your previous result is still available.",
+      reviewNoticeTitle: "No AI result was generated yet",
+      reviewReasonSourceTextNeedsReview:
+        "The current source text is still not stable enough for this mode. Add or clarify the source text first.",
+      reviewActionEditSourceText: "Recommended next step: improve the source text, then run AI again.",
+      reviewActionRetryAnalyze: "You can run AI again after confirming the source text.",
+      reviewSourceLocal: "This pass was stopped by a local decision before calling the model.",
       updatedJustNow: "Updated just now",
       viewOriginal: "Show original AI result",
       generatedAt: "Generated",
@@ -1156,6 +1183,7 @@ export const messages: Record<AppLanguage, Dictionary> = {
       linkImport: {
         title: "Link Assist Import",
         description: "Imported results, gaps, and warnings show up here.",
+        idleHint: "Once you add a link, the import result, gaps, and notes will appear here.",
         trigger: "Try Importing Link Content",
         partialHelper: "Only part of the reusable text was imported. Please continue adding the source text below.",
         insufficientHelper: "Only the title or excerpt was imported. Please add the main body text below.",
@@ -1255,10 +1283,14 @@ export const messages: Record<AppLanguage, Dictionary> = {
       noTranscriptAvailable: "No Transcript Available",
       internalError: "Something went wrong during analysis. Please try again."
     },
+    analysisStatus: {
+      needsReview: "Analysis Needs Review"
+    },
     status: {
       not_started: "Not started",
       processing: "Processing",
       done: "Ready",
+      needs_review: "Needs Review",
       failed: "Failed"
     },
     transcriptionStatus: {
@@ -1341,6 +1373,29 @@ export function getAnalyzeErrorMessage(
   }
 
   return target.internalError;
+}
+
+export function getAnalyzeReviewNotice(feedback: AnalyzeFeedback, language: AppLanguage) {
+  const detail = messages[language].detail;
+
+  const reason =
+    feedback.review.reasonCode === "source_text_needs_review"
+      ? detail.reviewReasonSourceTextNeedsReview
+      : detail.reviewReasonSourceTextNeedsReview;
+
+  const action =
+    feedback.review.recommendedAction === "retry_analysis"
+      ? detail.reviewActionRetryAnalyze
+      : feedback.review.recommendedAction === "edit_source_text"
+        ? detail.reviewActionEditSourceText
+        : null;
+
+  return {
+    title: detail.reviewNoticeTitle,
+    reason,
+    action,
+    sourceHint: feedback.source === "local" ? detail.reviewSourceLocal : null
+  };
 }
 
 export function getBilibiliImportErrorMessage(code: BilibiliImportErrorCode, language: AppLanguage) {
@@ -1504,6 +1559,7 @@ const importUiMessages = {
   "zh-CN": {
     detectingPlatform: "正在识别导入来源…",
     fetchingRemoteContent: "正在尝试获取可导入内容…",
+    idleHint: "输入链接后，可在这里查看提取结果、缺口和提示。",
     complete: "已获取足够内容，创建后可直接进入整理。",
     partial: "已导入部分内容，建议先补充正文再整理。",
     needsUserInput: "已识别链接或来源，但正文仍不足。可继续创建，并在下方补充正文 / 字幕 / 笔记。",
@@ -1551,6 +1607,7 @@ const importUiMessages = {
   en: {
     detectingPlatform: "Detecting the import source…",
     fetchingRemoteContent: "Trying to fetch importable content…",
+    idleHint: "Once you add a link, the import result, gaps, and notes will appear here.",
     complete: "Enough content was imported. You can create the record and go straight to AI organization.",
     partial: "Part of the content was imported. It is best to add more source text before organizing it.",
     needsUserInput:
@@ -1608,6 +1665,7 @@ const importUiMessages = {
 } satisfies Record<
   AppLanguage,
   {
+    idleHint: string;
     detectingPlatform: string;
     fetchingRemoteContent: string;
     complete: string;

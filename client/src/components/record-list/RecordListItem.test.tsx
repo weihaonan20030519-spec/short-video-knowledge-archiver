@@ -67,7 +67,7 @@ describe("RecordListItem", () => {
     );
 
     const chips = screen.getByTestId("record-list-summary-chips");
-    expect(screen.getByTestId("record-list-primary-pill")).toHaveTextContent("待修正文稿");
+    expect(screen.getByTestId("record-list-primary-pill")).toHaveTextContent("整理待复核");
     expect(chips).toHaveTextContent("浏览器导入");
     expect(chips).toHaveTextContent("小红书");
     expect(chips).toHaveTextContent("需复查");
@@ -98,7 +98,7 @@ describe("RecordListItem", () => {
     );
 
     const chips = screen.getByTestId("record-list-summary-chips");
-    expect(screen.getByTestId("record-list-primary-pill")).toHaveTextContent("待修正文稿");
+    expect(screen.getByTestId("record-list-primary-pill")).toHaveTextContent("整理待复核");
     expect(chips).toHaveTextContent("粘贴文本");
     expect(chips).not.toHaveTextContent("其他");
     expect(chips).not.toHaveTextContent("未知");
@@ -177,7 +177,7 @@ describe("RecordListItem", () => {
     );
 
     expect(screen.queryByTestId("record-list-primary-pill")).not.toBeInTheDocument();
-    expect(screen.getByTestId("record-list-card-contextual-status")).toHaveTextContent("待修正文稿");
+    expect(screen.getByTestId("record-list-card-contextual-status")).toHaveTextContent("整理待复核");
     expect(screen.getByTestId("record-list-secondary-chip")).toHaveClass(
       "min-h-6",
       "max-w-[10rem]",
@@ -209,7 +209,7 @@ describe("RecordListItem", () => {
       />
     );
 
-    expect(screen.getByTestId("record-list-card-primary-signal")).toHaveTextContent("待修正文稿");
+    expect(screen.getByTestId("record-list-card-primary-signal")).toHaveTextContent("整理待复核");
     const reviewChip = screen.getByTestId("record-list-review-later-chip");
     expect(reviewChip).toHaveClass("bg-slate-50", "text-slate-500");
   });

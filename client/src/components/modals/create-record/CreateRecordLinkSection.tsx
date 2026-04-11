@@ -42,6 +42,7 @@ export function CreateRecordLinkSection({
   const importText = getImportUiMessages(appLanguage);
   const showTrackSelector = trackOptions.length > 1;
   const showStatusPanel = hasAttemptedImport && (primaryMessage || helperMessage || importResult);
+  const showEmptyPanel = !showStatusPanel;
   const visibleWarnings = getVisibleImportWarnings(importResult, appLanguage);
   const showImportResultPanel = Boolean(importResult && (showTrackSelector || visibleWarnings.length > 0));
 
@@ -62,19 +63,28 @@ export function CreateRecordLinkSection({
         </button>
       </div>
 
+      {showEmptyPanel ? (
+        <div
+          className="rounded-2xl border border-dashed border-slate-200 bg-white/60 px-3 py-2.5 text-xs leading-6 text-slate-500"
+          data-testid="link-import-empty-panel"
+        >
+          <p>{importText.idleHint}</p>
+        </div>
+      ) : null}
+
       {showStatusPanel ? (
         <div
-          className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-600"
+          className={`rounded-2xl border px-3 py-2.5 text-xs ${statusTone}`}
           data-testid="link-import-result-panel"
         >
           {primaryMessage ? (
-            <p aria-live="polite" className={`rounded-2xl border px-3 py-2 text-xs leading-6 ${statusTone}`}>
+            <p aria-live="polite" className="text-xs font-medium leading-6">
               {primaryMessage}
             </p>
           ) : null}
 
           {helperMessage ? (
-            <p className="mt-2 px-1 text-xs leading-6 text-slate-500" data-testid="link-import-helper-message">
+            <p className="mt-2 text-[11px] leading-5 opacity-80" data-testid="link-import-helper-message">
               {helperMessage}
             </p>
           ) : null}
@@ -102,10 +112,10 @@ export function CreateRecordLinkSection({
 
           {showImportResultPanel && visibleWarnings.length ? (
             <div
-              className={`${primaryMessage || helperMessage || showTrackSelector ? "mt-2" : ""} rounded-xl bg-amber-50/70 px-3 py-2 text-[11px] leading-5 text-amber-900 ring-1 ring-inset ring-amber-100`}
+              className={`${primaryMessage || helperMessage || showTrackSelector ? "mt-2 pt-2" : ""} text-[11px] leading-5 opacity-90`}
               data-testid="link-import-warning-group"
             >
-              <p className="font-medium text-amber-950">{importText.warningsTitle}</p>
+              <p className="font-medium">{importText.warningsTitle}</p>
               {visibleWarnings.map((warning) => (
                 <p key={warning.code} className="mt-1 first:mt-0">
                   {warning.message}

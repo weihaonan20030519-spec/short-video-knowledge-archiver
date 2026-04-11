@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { getContextualRecordSummarySignals, getRecordSummarySignals } from "./recordSummary";
+import { getMessages } from "./i18n";
 import { createRecord } from "../test/factories";
 
 describe("getRecordSummarySignals", () => {
@@ -11,9 +12,11 @@ describe("getRecordSummarySignals", () => {
       aiOutputs: { concise: null, learning: null }
     });
 
+    const messages = getMessages("zh-CN");
     const summary = getRecordSummarySignals(record, "zh-CN");
 
-    expect(summary.status.label).toBe("待修正文稿");
+    expect(summary.status.label).toBe(messages.analysisStatus.needsReview);
+    expect(summary.status.label).not.toBe(messages.transcriptionStatus.transcript_needs_review);
     expect(summary.entryLabel).toBe("粘贴文本");
     expect(summary.platformLabel).toBeNull();
   });
@@ -73,11 +76,12 @@ describe("getRecordSummarySignals", () => {
       aiOutputs: { concise: null, learning: null }
     });
 
+    const messages = getMessages("zh-CN");
     const summary = getContextualRecordSummarySignals(record, "zh-CN", "needs_review");
 
     expect(summary.statusWeight).toBe("deemphasized");
     expect(summary.primaryStatus).toBeNull();
-    expect(summary.secondarySignals.map((signal) => signal.label)).toContain("待修正文稿");
+    expect(summary.secondarySignals.map((signal) => signal.label)).toContain(messages.analysisStatus.needsReview);
     expect(summary.secondarySignals.find((signal) => signal.key === "status")?.tone).toBe("muted");
   });
 
@@ -89,9 +93,10 @@ describe("getRecordSummarySignals", () => {
       aiOutputs: { concise: null, learning: null }
     });
 
+    const messages = getMessages("zh-CN");
     const summary = getContextualRecordSummarySignals(record, "zh-CN", "review_later");
 
-    expect(summary.primaryStatus?.label).toBe("待修正文稿");
+    expect(summary.primaryStatus?.label).toBe(messages.analysisStatus.needsReview);
     expect(summary.reviewLaterWeight).toBe("deemphasized");
     expect(summary.secondarySignals.find((signal) => signal.key === "reviewLater")?.tone).toBe("muted");
   });

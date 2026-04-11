@@ -21,7 +21,7 @@ import { analyzeRecord } from "../services/aiService";
 import type { CreateRecordDraft } from "../features/create-record/buildCreateRecordDraft";
 import { buildRecordImportSnapshot, resolveImport } from "../services/import/importCoordinator";
 import { isDuplicateFolderName, isDuplicateTagName, normalizeCollectionName } from "../lib/collection";
-import { createConciseAiSlot, createLearningAiSlot } from "../lib/aiTransform";
+import { createConciseAiSlot, createLearningAiSlot, getActiveMode } from "../lib/aiTransform";
 import { exportFolderToPdf } from "../lib/exportPdf";
 import {
   countUncategorizedRecords,
@@ -40,6 +40,7 @@ import type {
   Tag
 } from "../types/domain";
 import type { ResumeTranscriptionOutcome } from "../lib/transcriptionResume";
+import type { AnalyzeFeedback } from "../types/api";
 
 type CollectionModalState =
   | { entity: "folder"; mode: "create"; target: null }
@@ -53,6 +54,10 @@ type ConfirmState =
   | { entity: "tag"; target: Tag }
   | { entity: "record"; target: RecordItem }
   | null;
+
+function buildAnalyzeFeedbackKey(recordId: string, mode: AnalyzeMode) {
+  return `${recordId}:${mode}`;
+}
 
 function buildEmptyState(
   languageText: ReturnType<typeof useAppI18n>["t"],
@@ -126,9 +131,14 @@ export function HomePage() {
   const [collectionModal, setCollectionModal] = useState<CollectionModalState>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
   const [detailDismissed, setDetailDismissed] = useState(false);
+  const [analyzeFeedbackByKey, setAnalyzeFeedbackByKey] = useState<Record<string, AnalyzeFeedback>>({});
 
   const filteredRecords = useRecordFilters(records, tags, folders);
   const selectedRecord = filteredRecords.find((record) => record.id === selectedRecordId) || null;
+  const selectedAnalyzeFeedback =
+    selectedRecord
+      ? analyzeFeedbackByKey[buildAnalyzeFeedbackKey(selectedRecord.id, getActiveMode(selectedRecord))] || null
+      : null;
 
   useEffect(() => {
     const hasSelectedRecord = filteredRecords.some((record) => record.id === selectedRecordId);
@@ -215,10 +225,18 @@ export function HomePage() {
   };
 
   const handleAnalyze = async (record: RecordItem, mode: AnalyzeMode) => {
+    const feedbackKey = buildAnalyzeFeedbackKey(record.id, mode);
+
     if (!record.originalContent.trim()) {
       window.alert(t.common.originalContentRequired);
       return;
     }
+
+    setAnalyzeFeedbackByKey((current) => {
+      const next = { ...current };
+      delete next[feedbackKey];
+      return next;
+    });
 
     await recordRepository.update(record.id, {
       aiStatus: "processing",
@@ -229,7 +247,12 @@ export function HomePage() {
 
     const response = await analyzeRecord(record, mode, appLanguage);
 
-    if (!response.success) {
+    if (response.outcome === "failed") {
+      setAnalyzeFeedbackByKey((current) => {
+        const next = { ...current };
+        delete next[feedbackKey];
+        return next;
+      });
       await recordRepository.update(record.id, {
         aiStatus: "failed",
         aiErrorCode: response.error.code,
@@ -238,6 +261,33 @@ export function HomePage() {
       });
       return;
     }
+
+    if (response.outcome === "needs_review") {
+      setAnalyzeFeedbackByKey((current) => ({
+        ...current,
+        [feedbackKey]: {
+          recordId: record.id,
+          mode,
+          generatedAt: response.meta.generatedAt,
+          source: response.meta.source,
+          review: response.review
+        }
+      }));
+      await recordRepository.update(record.id, {
+        currentMode: mode,
+        aiStatus: "needs_review",
+        aiErrorMessage: null,
+        aiErrorCode: null,
+        updatedAt: new Date().toISOString()
+      });
+      return;
+    }
+
+    setAnalyzeFeedbackByKey((current) => {
+      const next = { ...current };
+      delete next[feedbackKey];
+      return next;
+    });
 
     const previous = record.aiOutputs[mode];
     const slot =
@@ -264,7 +314,7 @@ export function HomePage() {
       },
       updatedAt: new Date().toISOString()
     });
-  };
+    };
 
   const handleResumeTranscription = async (record: RecordItem): Promise<ResumeTranscriptionOutcome> => {
     if (!canResumeTranscription(record) || !record.originalUrl) {
@@ -450,6 +500,12 @@ export function HomePage() {
     }
 
     await recordRepository.delete(confirmState.target.id);
+    setAnalyzeFeedbackByKey((current) => {
+      const next = { ...current };
+      delete next[buildAnalyzeFeedbackKey(confirmState.target.id, "concise")];
+      delete next[buildAnalyzeFeedbackKey(confirmState.target.id, "learning")];
+      return next;
+    });
     if (selectedRecordId === confirmState.target.id) {
       setDetailDismissed(false);
       setSelectedRecordId(null);
@@ -508,6 +564,7 @@ export function HomePage() {
             record={selectedRecord}
             folders={normalizedFolders}
             tags={normalizedTags}
+            analyzeFeedback={selectedAnalyzeFeedback}
             onAnalyze={handleAnalyze}
             onResumeTranscription={handleResumeTranscription}
             onDeleteRecord={handleDeleteRecord}

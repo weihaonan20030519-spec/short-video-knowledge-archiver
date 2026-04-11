@@ -6,14 +6,21 @@ import type {
   TextHighlight
 } from "../types/domain";
 import {
-  extractFallbackHighlightCandidates,
-  normalizeHighlightsForItem,
-  type RenderableHighlight
+  decideHighlightRenderMode,
+  type EmphasisSpan,
+  type FallbackEmphasis,
+  type HighlightSectionKey,
+  type HighlightRenderMode,
+  type QuoteHighlight
 } from "./highlight";
 
 export interface KnowledgeSectionItem {
-  text: string;
-  highlights: RenderableHighlight[];
+  sentence: string;
+  mode: HighlightRenderMode;
+  quoteHighlight: QuoteHighlight | null;
+  emphasisSpans: EmphasisSpan[];
+  fallbackEmphasis: FallbackEmphasis | null;
+  coverageFallback: FallbackEmphasis | null;
 }
 
 export interface KnowledgeSection {
@@ -70,23 +77,43 @@ function dedupeHighlights(highlights: TextHighlight[]) {
 function buildSectionItems(
   items: string[],
   rawHighlights: TextHighlight[],
-  fallbackTone: HighlightTone
+  fallbackTone: HighlightTone,
+  sectionKey: HighlightSectionKey
 ): KnowledgeSectionItem[] {
   const normalizedRawHighlights = dedupeHighlights(rawHighlights);
 
-  return items.map((item) => {
-    const candidates =
-      normalizedRawHighlights.length > 0
-        ? normalizedRawHighlights
-        : extractFallbackHighlightCandidates(item, fallbackTone).map((text) => ({
-            text,
-            tone: fallbackTone
-          }));
-
+  const preliminaryItems = items.map((item) => {
     return {
-      text: item,
-      highlights: normalizeHighlightsForItem(item, candidates, fallbackTone)
+      sentence: item,
+      ...decideHighlightRenderMode(item, normalizedRawHighlights, fallbackTone, sectionKey)
     };
+  });
+
+  let signalDrought = 0;
+
+  return preliminaryItems.map((item) => {
+    const hasPrimarySignal = Boolean(
+      item.quoteHighlight || item.emphasisSpans.length > 0 || item.fallbackEmphasis
+    );
+
+    if (hasPrimarySignal) {
+      signalDrought = 0;
+      return item;
+    }
+
+    signalDrought += 1;
+
+    if (signalDrought >= 2 && item.coverageFallback) {
+      signalDrought = 0;
+
+      return {
+        ...item,
+        mode: "emphasis" as const,
+        fallbackEmphasis: item.coverageFallback
+      };
+    }
+
+    return item;
   });
 }
 
@@ -111,12 +138,12 @@ export function buildKnowledgeSections(
       {
         key: "summary",
         title: labels.summary,
-        items: buildSectionItems(summaryItems, concise.highlights?.summary || [], "core")
+        items: buildSectionItems(summaryItems, concise.highlights?.summary || [], "core", "summary")
       },
       {
         key: "bullets",
         title: labels.bullets,
-        items: buildSectionItems(bulletItems, concise.highlights?.bullets || [], "action")
+        items: buildSectionItems(bulletItems, concise.highlights?.bullets || [], "action", "bullets")
       }
     ];
 
@@ -133,22 +160,22 @@ export function buildKnowledgeSections(
     {
       key: "coreConclusion",
       title: labels.coreConclusion,
-      items: buildSectionItems(coreConclusion, learning.highlights?.coreConclusion || [], "core")
+      items: buildSectionItems(coreConclusion, learning.highlights?.coreConclusion || [], "core", "coreConclusion")
     },
     {
       key: "logicFramework",
       title: labels.logicFramework,
-      items: buildSectionItems(logicFramework, learning.highlights?.logicFramework || [], "method")
+      items: buildSectionItems(logicFramework, learning.highlights?.logicFramework || [], "method", "logicFramework")
     },
     {
       key: "keyDetails",
       title: labels.keyDetails,
-      items: buildSectionItems(keyDetails, learning.highlights?.keyDetails || [], "warning")
+      items: buildSectionItems(keyDetails, learning.highlights?.keyDetails || [], "warning", "keyDetails")
     },
     {
       key: "reusablePoints",
       title: labels.reusablePoints,
-      items: buildSectionItems(reusablePoints, learning.highlights?.reusablePoints || [], "action")
+      items: buildSectionItems(reusablePoints, learning.highlights?.reusablePoints || [], "action", "reusablePoints")
     }
   ];
 

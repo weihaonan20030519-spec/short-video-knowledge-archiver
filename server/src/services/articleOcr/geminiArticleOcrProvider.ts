@@ -7,6 +7,15 @@ import { env, requireGeminiKey } from "../../utils/env.js";
 import { logger } from "../../utils/logger.js";
 import { fetchImageAsBase64 } from "./imageFetchHelper.js";
 
+const MAX_OCR_ATTEMPTS_PER_IMAGE = 2;
+const SOFT_RATE_LIMIT_RETRY_DELAY_MS = 10_000;
+const SERVICE_UNAVAILABLE_RETRY_DELAY_MS = 3_000;
+const MAX_PROVIDER_RETRY_DELAY_MS = 30_000;
+const MAX_INTERACTIVE_SOFT_RATE_LIMIT_DELAY_MS = 5_000;
+const MAX_CONSECUTIVE_RETRYABLE_FAILURES = 2;
+
+type RateLimitKind = "hard_quota" | "soft_rate_limit" | null;
+
 function normalizeWhitespace(input?: string | null) {
   return input?.replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim() || null;
 }
@@ -66,6 +75,28 @@ function countFailureCodes(imageResults: ArticleOcrImageResult[]) {
   }, {});
 }
 
+function findNestedStringValues(value: unknown, accumulator: string[] = []) {
+  if (typeof value === "string" && value.trim()) {
+    accumulator.push(value);
+    return accumulator;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      findNestedStringValues(item, accumulator);
+    }
+    return accumulator;
+  }
+
+  if (value && typeof value === "object") {
+    for (const nested of Object.values(value)) {
+      findNestedStringValues(nested, accumulator);
+    }
+  }
+
+  return accumulator;
+}
+
 function findErrorStatus(error: unknown): number | null {
   if (!error || typeof error !== "object") {
     return null;
@@ -107,10 +138,78 @@ function findErrorMessage(error: unknown): string {
   }
 }
 
+function extractProviderRetryDelayMs(error: unknown): number | null {
+  const rawCandidates = [findErrorMessage(error), ...findNestedStringValues(error)];
+  const objectCandidate =
+    error && typeof error === "object"
+      ? (error as { retryDelayMs?: unknown; retryDelay?: unknown; details?: unknown; error?: unknown })
+      : null;
+
+  const numericValues = [
+    objectCandidate?.retryDelayMs,
+    typeof objectCandidate?.retryDelay === "number" ? objectCandidate.retryDelay : null
+  ];
+
+  for (const value of numericValues) {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      return value;
+    }
+  }
+
+  for (const candidate of rawCandidates) {
+    const trimmed = candidate.trim();
+    const msMatch = trimmed.match(/retryDelay(?:Ms)?["'=:\s]+["']?(\d{2,6})\s*ms["']?/i);
+    if (msMatch) {
+      return Number(msMatch[1]);
+    }
+
+    const secondMatch = trimmed.match(/retryDelay["'=:\s]+["']?(\d+(?:\.\d+)?)\s*s["']?/i);
+    if (secondMatch) {
+      return Math.round(Number(secondMatch[1]) * 1000);
+    }
+
+    const durationMatch = trimmed.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/i);
+    if (durationMatch) {
+      return Math.round(Number(durationMatch[1]) * 1000);
+    }
+  }
+
+  return null;
+}
+
+function classifyRateLimitKind(error: unknown): RateLimitKind {
+  const lowered = [findErrorMessage(error), ...findNestedStringValues(error)].join(" ").toLowerCase();
+
+  if (
+    lowered.includes("quota exceeded") ||
+    lowered.includes("resource_exhausted") ||
+    lowered.includes("quota failure") ||
+    lowered.includes("free tier quota")
+  ) {
+    return "hard_quota";
+  }
+
+  if (
+    lowered.includes("rate limit") ||
+    lowered.includes("too many requests") ||
+    lowered.includes("retrydelay")
+  ) {
+    return "soft_rate_limit";
+  }
+
+  return null;
+}
+
+function clampRetryDelayMs(delayMs: number) {
+  return Math.min(Math.max(delayMs, 1000), MAX_PROVIDER_RETRY_DELAY_MS);
+}
+
 function classifyOcrFailure(error: unknown) {
   const status = findErrorStatus(error);
   const message = findErrorMessage(error);
   const lowered = message.toLowerCase();
+  const providerRetryDelayMs = extractProviderRetryDelayMs(error);
+  const rateLimitKind = status === 429 ? classifyRateLimitKind(error) : null;
 
   if (
     message === "IMAGE_TOO_LARGE" ||
@@ -119,7 +218,11 @@ function classifyOcrFailure(error: unknown) {
   ) {
     return {
       code: "OCR_BAD_REQUEST" as const,
-      stopRemaining: false,
+      retryable: false,
+      providerRetryDelayMs: null,
+      effectiveRetryDelayMs: null,
+      rateLimitKind: null,
+      shouldAbortBatch: false,
       message:
         message === "IMAGE_TOO_LARGE"
           ? "Image OCR failed because the image input is too large for the current OCR path."
@@ -136,10 +239,26 @@ function classifyOcrFailure(error: unknown) {
     lowered.includes("rate limit") ||
     lowered.includes("too many requests")
   ) {
+    const interactiveDelayAllowed =
+      providerRetryDelayMs != null && providerRetryDelayMs <= MAX_INTERACTIVE_SOFT_RATE_LIMIT_DELAY_MS;
+    const effectiveRetryDelayMs =
+      rateLimitKind === "soft_rate_limit" && interactiveDelayAllowed && providerRetryDelayMs
+        ? clampRetryDelayMs(providerRetryDelayMs)
+        : null;
+
     return {
       code: "OCR_RATE_LIMITED" as const,
-      stopRemaining: true,
-      message: "Image OCR was rate limited by Gemini (429 TooManyRequests)."
+      retryable: rateLimitKind === "soft_rate_limit" && effectiveRetryDelayMs != null,
+      providerRetryDelayMs,
+      effectiveRetryDelayMs,
+      rateLimitKind,
+      shouldAbortBatch: rateLimitKind === "hard_quota" || effectiveRetryDelayMs == null,
+      message:
+        rateLimitKind === "hard_quota"
+          ? "Image OCR hit a Gemini hard quota limit (429 quota exhausted)."
+          : rateLimitKind === "soft_rate_limit" && providerRetryDelayMs != null && !interactiveDelayAllowed
+            ? "Image OCR hit a Gemini soft rate limit, but the suggested retry delay is too long for this interactive import."
+          : "Image OCR was rate limited by Gemini (429 TooManyRequests)."
     };
   }
 
@@ -151,7 +270,11 @@ function classifyOcrFailure(error: unknown) {
   ) {
     return {
       code: "OCR_SERVICE_UNAVAILABLE" as const,
-      stopRemaining: true,
+      retryable: true,
+      providerRetryDelayMs,
+      effectiveRetryDelayMs: clampRetryDelayMs(providerRetryDelayMs ?? SERVICE_UNAVAILABLE_RETRY_DELAY_MS),
+      rateLimitKind: null,
+      shouldAbortBatch: false,
       message: "Image OCR hit a Gemini service availability issue (503 ServiceUnavailable)."
     };
   }
@@ -165,7 +288,11 @@ function classifyOcrFailure(error: unknown) {
   ) {
     return {
       code: "OCR_BAD_REQUEST" as const,
-      stopRemaining: false,
+      retryable: false,
+      providerRetryDelayMs: null,
+      effectiveRetryDelayMs: null,
+      rateLimitKind: null,
+      shouldAbortBatch: false,
       message: "Image OCR was rejected because the current image input was not accepted (400 BadRequest)."
     };
   }
@@ -178,7 +305,11 @@ function classifyOcrFailure(error: unknown) {
   ) {
     return {
       code: "OCR_UNKNOWN_ERROR" as const,
-      stopRemaining: false,
+      retryable: false,
+      providerRetryDelayMs: null,
+      effectiveRetryDelayMs: null,
+      rateLimitKind: null,
+      shouldAbortBatch: false,
       message:
         message === "IMAGE_URL_BLOCKED"
           ? "Image OCR could not fetch the image because the URL was blocked."
@@ -192,9 +323,19 @@ function classifyOcrFailure(error: unknown) {
 
   return {
     code: "OCR_UNKNOWN_ERROR" as const,
-    stopRemaining: false,
+    retryable: false,
+    providerRetryDelayMs: null,
+    effectiveRetryDelayMs: null,
+    rateLimitKind: null,
+    shouldAbortBatch: false,
     message: `Image OCR failed because of an unexpected provider error: ${message}.`
   };
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 export class GeminiArticleOcrProvider implements ArticleOcrProvider {
@@ -208,111 +349,165 @@ export class GeminiArticleOcrProvider implements ArticleOcrProvider {
     let earlyStopped = false;
     let earlyStopAt: number | null = null;
     let earlyStopReason: ArticleImportWarningCode | null = null;
+    let consecutiveRetryableFailures = 0;
 
     logger.info("OCR run started", {
       ocrRunId,
       platform: request.platform,
       originalUrl: request.originalUrl,
       resolvedUrl: request.resolvedUrl ?? null,
+      discoveredImageCount: request.discoveredImageCount ?? request.images.length,
       candidateCount: request.images.length
     });
 
     for (const image of request.images) {
       const ordinal = imageResults.length + 1;
       let imagePayload: { base64: string; mimeType: string } | null = null;
-      try {
-        imagePayload = await fetchImageAsBase64(image.url);
 
-        const prompt = [
-          "Extract only the visible text from the image below.",
-          "Do not summarize, translate, or add commentary.",
-          request.originalUrl ? `Source page: ${request.originalUrl}` : "Source page: unknown",
-          request.resolvedUrl ? `Resolved URL: ${request.resolvedUrl}` : "Resolved URL: unknown",
-          "Return only the extracted text in plain form."
-        ].join("\n");
+      for (let attempt = 1; attempt <= MAX_OCR_ATTEMPTS_PER_IMAGE; attempt += 1) {
+        try {
+          imagePayload = await fetchImageAsBase64(image.url);
 
-        const contents = [
-          {
-            role: "user",
-            parts: [
-              { text: prompt },
-              {
-                inlineData: {
-                  mimeType: imagePayload.mimeType,
-                  data: imagePayload.base64
+          const prompt = [
+            "Extract only the visible text from the image below.",
+            "Do not summarize, translate, or add commentary.",
+            request.originalUrl ? `Source page: ${request.originalUrl}` : "Source page: unknown",
+            request.resolvedUrl ? `Resolved URL: ${request.resolvedUrl}` : "Resolved URL: unknown",
+            "Return only the extracted text in plain form."
+          ].join("\n");
+
+          const contents = [
+            {
+              role: "user",
+              parts: [
+                { text: prompt },
+                {
+                  inlineData: {
+                    mimeType: imagePayload.mimeType,
+                    data: imagePayload.base64
+                  }
                 }
-              }
-            ]
-          }
-        ];
+              ]
+            }
+          ];
 
-        const result = await client.models.generateContent({
-          model: env.ARTICLE_OCR_MODEL,
-          contents,
-          config: {
-            temperature: 0,
-            responseMimeType: "text/plain"
-          }
-        });
-
-        const imageText = normalizeWhitespace(result.text);
-
-        if (imageText) {
-          imageResults.push({
-            ordinal,
-            imageUrl: image.url,
-            source: image.source,
-            succeeded: true,
-            text: imageText
+          const result = await client.models.generateContent({
+            model: env.ARTICLE_OCR_MODEL,
+            contents,
+            config: {
+              temperature: 0,
+              responseMimeType: "text/plain"
+            }
           });
-        } else {
-          const warningMessage = `Image OCR succeeded for ${image.url} but no text was detected.`;
+
+          const imageText = normalizeWhitespace(result.text);
+
+          consecutiveRetryableFailures = 0;
+
+          if (imageText) {
+            imageResults.push({
+              ordinal,
+              imageUrl: image.url,
+              source: image.source,
+              succeeded: true,
+              text: imageText
+            });
+          } else {
+            const warningMessage = `Image OCR succeeded for ${image.url} but no text was detected.`;
+            imageResults.push({
+              ordinal,
+              imageUrl: image.url,
+              source: image.source,
+              succeeded: false,
+              text: null,
+              warningCode: "OCR_NO_TEXT_DETECTED",
+              warningMessage
+            });
+            warnings.push(createWarning("OCR_NO_TEXT_DETECTED", warningMessage));
+          }
+          break;
+        } catch (error: unknown) {
+          const failure = classifyOcrFailure(error);
+          const fetchMeta = getImageFetchMeta(error);
+          const isLastAttempt = attempt >= MAX_OCR_ATTEMPTS_PER_IMAGE;
+
+          if (failure.retryable && !isLastAttempt) {
+            const retryInMs = failure.effectiveRetryDelayMs ?? SOFT_RATE_LIMIT_RETRY_DELAY_MS;
+            logger.info("OCR image retry scheduled", {
+              ocrRunId,
+              imageOrdinal: ordinal,
+              imageUrl: image.url,
+              imageHost: fetchMeta.imageHost ?? getImageHost(image.url),
+              imageSource: image.source,
+              mimeType: imagePayload?.mimeType ?? fetchMeta.mimeType,
+              contentLength: fetchMeta.contentLength,
+              status: findErrorStatus(error),
+              warningCode: failure.code,
+              rateLimitKind: failure.rateLimitKind,
+              providerRetryDelayMs: failure.providerRetryDelayMs,
+              effectiveRetryDelayMs: retryInMs,
+              shouldAbortBatch: failure.shouldAbortBatch,
+              attempt,
+              maxAttempts: MAX_OCR_ATTEMPTS_PER_IMAGE,
+              retryInMs,
+              errorMessage: findErrorMessage(error)
+            });
+            if (retryInMs > 0) {
+              await sleep(retryInMs);
+            }
+            continue;
+          }
+
+          consecutiveRetryableFailures = failure.retryable ? consecutiveRetryableFailures + 1 : 0;
+          const shouldStopRemaining =
+            failure.shouldAbortBatch || (failure.retryable && consecutiveRetryableFailures >= MAX_CONSECUTIVE_RETRYABLE_FAILURES);
+          const warningMessage = shouldStopRemaining
+            ? `${failure.message} OCR was stopped for the remaining images in this import.`
+            : failure.message;
+
+          logger.info("OCR image failed", {
+            ocrRunId,
+            imageOrdinal: ordinal,
+            imageUrl: image.url,
+            imageHost: fetchMeta.imageHost ?? getImageHost(image.url),
+            imageSource: image.source,
+            mimeType: imagePayload?.mimeType ?? fetchMeta.mimeType,
+            contentLength: fetchMeta.contentLength,
+            status: findErrorStatus(error),
+            warningCode: failure.code,
+            retryable: failure.retryable,
+            rateLimitKind: failure.rateLimitKind,
+            providerRetryDelayMs: failure.providerRetryDelayMs,
+            effectiveRetryDelayMs: failure.effectiveRetryDelayMs,
+            shouldAbortBatch: failure.shouldAbortBatch,
+            attempt,
+            maxAttempts: MAX_OCR_ATTEMPTS_PER_IMAGE,
+            stopRemaining: shouldStopRemaining,
+            errorMessage: findErrorMessage(error)
+          });
           imageResults.push({
             ordinal,
             imageUrl: image.url,
             source: image.source,
             succeeded: false,
             text: null,
-            warningCode: "OCR_NO_TEXT_DETECTED",
+            warningCode: failure.code,
             warningMessage
           });
-          warnings.push(createWarning("OCR_NO_TEXT_DETECTED", warningMessage));
-        }
-      } catch (error: unknown) {
-        const failure = classifyOcrFailure(error);
-        const warningMessage = failure.stopRemaining
-          ? `${failure.message} OCR was stopped for the remaining images in this import.`
-          : failure.message;
-        const fetchMeta = getImageFetchMeta(error);
-        logger.info("OCR image failed", {
-          ocrRunId,
-          imageOrdinal: ordinal,
-          imageUrl: image.url,
-          imageHost: fetchMeta.imageHost ?? getImageHost(image.url),
-          imageSource: image.source,
-          mimeType: imagePayload?.mimeType ?? fetchMeta.mimeType,
-          contentLength: fetchMeta.contentLength,
-          status: findErrorStatus(error),
-          warningCode: failure.code,
-          stopRemaining: failure.stopRemaining,
-          errorMessage: findErrorMessage(error)
-        });
-        imageResults.push({
-          ordinal,
-          imageUrl: image.url,
-          source: image.source,
-          succeeded: false,
-          text: null,
-          warningCode: failure.code,
-          warningMessage
-        });
-        warnings.push(createWarning(failure.code, warningMessage));
-        if (failure.stopRemaining) {
-          earlyStopped = true;
-          earlyStopAt = ordinal;
-          earlyStopReason = failure.code;
+          warnings.push(createWarning(failure.code, warningMessage));
+
+          if (shouldStopRemaining) {
+            earlyStopped = true;
+            earlyStopAt = ordinal;
+            earlyStopReason = failure.code;
+          }
+
           break;
         }
+      }
+
+      if (earlyStopped) {
+        break;
       }
     }
 
@@ -348,7 +543,16 @@ export class GeminiArticleOcrProvider implements ArticleOcrProvider {
       recognizedText,
       recognizedTextLength,
       warnings,
-      imageResults
+      imageResults,
+      runMeta: {
+        discoveredImageCount: request.discoveredImageCount ?? request.images.length,
+        candidateCount: request.images.length,
+        attemptedCount: imageResults.length,
+        remainingImagesSkipped,
+        earlyStopped,
+        earlyStopReason,
+        errorCounts
+      }
     };
   }
 }

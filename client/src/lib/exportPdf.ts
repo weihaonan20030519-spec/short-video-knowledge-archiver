@@ -12,9 +12,9 @@ function escapeHtml(value: string) {
     .replace(/\"/g, "&quot;");
 }
 
-function renderLines(lines: Array<string | { text: string }>) {
+function renderLines(lines: Array<string | { sentence: string }>) {
   return lines
-    .map((line) => ("string" === typeof line ? line : line.text))
+    .map((line) => ("string" === typeof line ? line : line.sentence))
     .map((line) => `<li>${escapeHtml(line)}</li>`)
     .join("");
 }

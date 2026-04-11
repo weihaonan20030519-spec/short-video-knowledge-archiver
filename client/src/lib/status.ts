@@ -9,6 +9,7 @@ export const statusToneMap: Record<AIStatus, string> = {
   not_started: "bg-slate-200 text-slate-700 ring-1 ring-slate-300/80",
   processing: "bg-amber-100 text-amber-800 ring-1 ring-amber-200",
   done: "bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200",
+  needs_review: "bg-orange-100 text-orange-800 ring-1 ring-orange-200",
   failed: "bg-rose-100 text-rose-800 ring-1 ring-rose-200"
 };
 
@@ -125,8 +126,10 @@ export function getRecordListStatus(record: RecordItem, language: AppLanguage = 
     case "needs_review":
       return {
         key,
-        label: messages.transcriptionStatus.transcript_needs_review,
-        tone: transcriptionStatusToneMap.transcript_needs_review
+        // Analyze v1 public review semantics must stay separate from transcript review.
+        // Do not reuse `transcriptionStatus.transcript_needs_review` wording here.
+        label: messages.analysisStatus.needsReview,
+        tone: statusToneMap.needs_review
       };
     case "transcript_ready":
       return {

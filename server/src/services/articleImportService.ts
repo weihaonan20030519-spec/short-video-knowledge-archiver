@@ -1,6 +1,7 @@
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import { ensureSafeUrl } from "../utils/safeUrl.js";
+import { logger } from "../utils/logger.js";
 
 import {
   articleImportRequestSchema,
@@ -37,7 +38,9 @@ const FULL_TEXT_LENGTH = 120;
 const PARTIAL_TEXT_LENGTH = 24;
 const XIAOHONGSHU_OCR_HTML_THRESHOLD = 1000;
 const IMAGE_RELIANT_HTML_THRESHOLD = 450;
-const MAX_CANDIDATE_IMAGES = 3;
+const DEFAULT_MAX_CANDIDATE_IMAGES = 3;
+const XIAOHONGSHU_MAX_CANDIDATE_IMAGES = 9;
+const OCR_SUPPLEMENT_HEADING = "[图片文字补充]";
 const BLOCKED_HOSTNAMES = new Set([
   "localhost",
   "metadata",
@@ -123,6 +126,25 @@ function normalizeTextLength(text?: string | null) {
   return normalizeWhitespace(text)?.length ?? 0;
 }
 
+function mergeContentWithImageOcr(baseText?: string | null, imageOcrText?: string | null) {
+  const normalizedBase = normalizeWhitespace(baseText);
+  const normalizedOcr = normalizeWhitespace(imageOcrText);
+
+  if (!normalizedOcr) {
+    return normalizedBase;
+  }
+
+  if (!normalizedBase) {
+    return normalizedOcr;
+  }
+
+  if (normalizedBase.includes(normalizedOcr)) {
+    return normalizedBase;
+  }
+
+  return `${normalizedBase}\n\n${OCR_SUPPLEMENT_HEADING}\n${normalizedOcr}`;
+}
+
 function classifyTextCompletenessByLength(length: number) {
   const normalizedLength = Math.max(0, length);
 
@@ -191,6 +213,14 @@ function dedupeCandidateImages(images: ArticleOcrCandidateImage[]) {
 
 function selectCandidateImages(images: ArticleOcrCandidateImage[], limit: number) {
   return images.slice(0, limit);
+}
+
+function resolveOcrCandidateLimit(platform: ArticleImportPlatform) {
+  if (platform === "xiaohongshu") {
+    return XIAOHONGSHU_MAX_CANDIDATE_IMAGES;
+  }
+
+  return DEFAULT_MAX_CANDIDATE_IMAGES;
 }
 
 function extractContentImageCandidates(contentHtml: string | null | undefined, baseUrl: string) {
@@ -325,7 +355,7 @@ function buildExtractionReport(input: {
   const imageSignalsFound = input.imageSignalsFound ?? 0;
   const candidateImagesSelected = input.candidateImagesSelected ?? 0;
   const bodyCandidateImagesSelected = input.bodyCandidateImagesSelected ?? 0;
-  const ocrAttemptLimit = input.ocrAttemptLimit ?? MAX_CANDIDATE_IMAGES;
+  const ocrAttemptLimit = input.ocrAttemptLimit ?? DEFAULT_MAX_CANDIDATE_IMAGES;
   const candidateSelectionReasons = input.candidateSelectionReasons ?? [];
   const imageOcrAttempted = input.imageOcrAttempted ?? 0;
   const imageOcrSucceeded = input.imageOcrSucceeded ?? 0;
@@ -630,7 +660,9 @@ export async function importArticleContent(
     const usingMetaFallback = contentImages.candidates.length === 0 && metaImages.candidates.length > 0;
     const chosenImageSummary = contentImages.candidates.length > 0 ? contentImages : metaImages;
     const candidateImagesBeforeCap = chosenImageSummary.candidates;
-    const contentImageCandidates = selectCandidateImages(candidateImagesBeforeCap, MAX_CANDIDATE_IMAGES);
+    const ocrCandidateLimit = resolveOcrCandidateLimit(resolvedPlatform);
+    const discoveredImageCount = candidateImagesBeforeCap.length;
+    const contentImageCandidates = selectCandidateImages(candidateImagesBeforeCap, ocrCandidateLimit);
     const bodyCandidateImagesSelected = contentImages.candidates.length > 0 ? contentImageCandidates.length : 0;
     const candidateSelectionReasons: ArticleImportCandidateSelectionReason[] = [];
 
@@ -657,6 +689,15 @@ export async function importArticleContent(
     let imageOcrSucceeded = 0;
     let imageOcrTextLength = 0;
     let imageOcrText: string | null = null;
+    let ocrRunMeta: {
+      discoveredImageCount: number;
+      candidateCount: number;
+      attemptedCount: number;
+      remainingImagesSkipped: number;
+      earlyStopped: boolean;
+      earlyStopReason: ArticleImportWarningCode | null;
+      errorCounts: Partial<Record<ArticleImportWarningCode, number>>;
+    } | null = null;
 
     if (contentImageCandidates.length > 0) {
       if (!shouldAttemptOcr) {
@@ -680,7 +721,8 @@ export async function importArticleContent(
           platform: resolvedPlatform,
           originalUrl: url,
           resolvedUrl,
-          images: contentImageCandidates
+          images: contentImageCandidates,
+          discoveredImageCount
         });
         const imageResults = ocrResult.imageResults;
         imageOcrAttempted = imageResults?.length ?? ocrResult.attempted;
@@ -697,6 +739,7 @@ export async function importArticleContent(
           : normalizeWhitespace(ocrResult.recognizedText);
         imageOcrTextLength = imageOcrText?.length ?? 0;
         ocrWarnings = ocrResult.warnings;
+        ocrRunMeta = ocrResult.runMeta ?? null;
         if (imageOcrTextLength > 0) {
           ocrStatus = imageOcrSucceeded >= imageOcrAttempted ? "successful" : "partial";
         } else {
@@ -713,6 +756,25 @@ export async function importArticleContent(
       }
     }
 
+    if (contentImageCandidates.length > 0) {
+      logger.info("Article import OCR evaluation completed", {
+        originalUrl: url,
+        resolvedUrl,
+        platform: resolvedPlatform,
+        discoveredImageCount: ocrRunMeta?.discoveredImageCount ?? discoveredImageCount,
+        candidateCount: ocrRunMeta?.candidateCount ?? contentImageCandidates.length,
+        attemptedCount: ocrRunMeta?.attemptedCount ?? imageOcrAttempted,
+        remainingImagesSkipped:
+          ocrRunMeta?.remainingImagesSkipped ?? Math.max(0, contentImageCandidates.length - imageOcrAttempted),
+        earlyStopped: ocrRunMeta?.earlyStopped ?? false,
+        earlyStopReason: ocrRunMeta?.earlyStopReason ?? null,
+        errorCounts: ocrRunMeta?.errorCounts ?? {},
+        ocrStatus,
+        imageOcrSucceeded,
+        imageOcrTextLength
+      });
+    }
+
     if (readabilityText) {
       const extractionSources: ArticleImportExtractionSource[] = ["html_text"];
       if (imageOcrText) {
@@ -725,7 +787,7 @@ export async function importArticleContent(
         platform: resolvedPlatform,
         title,
         excerpt,
-        contentText: readabilityText,
+        contentText: mergeContentWithImageOcr(readabilityText, imageOcrText),
         fetchSucceeded: true,
         extractionMethod: "readability",
           extractionReport: buildExtractionReport({
@@ -734,7 +796,7 @@ export async function importArticleContent(
           imageSignalsFound: chosenImageSummary.imageSignalsFound,
           candidateImagesSelected: contentImageCandidates.length,
           bodyCandidateImagesSelected,
-          ocrAttemptLimit: MAX_CANDIDATE_IMAGES,
+          ocrAttemptLimit: ocrCandidateLimit,
           candidateSelectionReasons,
           imageOcrAttempted,
           imageOcrSucceeded,
@@ -753,6 +815,19 @@ export async function importArticleContent(
       if (imageOcrText) {
         extractionSources.push("image_ocr");
       }
+      const fallbackWarnings =
+        excerpt || !imageOcrText
+          ? [
+              createWarning(
+                "META_ONLY",
+                "Only title or summary text was available from the page. You can continue by adding the body text manually."
+              ),
+              createWarning(
+                "MANUAL_COMPLETION_REQUIRED",
+                "Only part of the page was imported. Please add the main text manually before organizing it."
+              )
+            ]
+          : [];
 
       return buildHandledResult({
         originalUrl: url,
@@ -760,7 +835,7 @@ export async function importArticleContent(
         platform: resolvedPlatform,
         title,
         excerpt,
-        contentText: excerpt,
+        contentText: mergeContentWithImageOcr(excerpt, imageOcrText),
         fetchSucceeded: true,
         extractionMethod: "meta_fallback",
         extractionReport: buildExtractionReport({
@@ -769,24 +844,41 @@ export async function importArticleContent(
           imageSignalsFound: chosenImageSummary.imageSignalsFound,
           candidateImagesSelected: contentImageCandidates.length,
           bodyCandidateImagesSelected,
-          ocrAttemptLimit: MAX_CANDIDATE_IMAGES,
+          ocrAttemptLimit: ocrCandidateLimit,
           candidateSelectionReasons,
           imageOcrAttempted,
           imageOcrSucceeded,
           imageOcrTextLength,
           ocrStatus
         }),
-        warnings: [
-          createWarning(
-            "META_ONLY",
-            "Only title or summary text was available from the page. You can continue by adding the body text manually."
-          ),
-          createWarning(
-            "MANUAL_COMPLETION_REQUIRED",
-            "Only part of the page was imported. Please add the main text manually before organizing it."
-          ),
-          ...ocrWarnings
-        ]
+        warnings: [...fallbackWarnings, ...ocrWarnings]
+      });
+    }
+
+    if (imageOcrText) {
+      return buildHandledResult({
+        originalUrl: url,
+        resolvedUrl,
+        platform: resolvedPlatform,
+        title,
+        excerpt,
+        contentText: imageOcrText,
+        fetchSucceeded: true,
+        extractionMethod: "none",
+        extractionReport: buildExtractionReport({
+          extractionSources: ["image_ocr"],
+          htmlTextLength: 0,
+          imageSignalsFound: chosenImageSummary.imageSignalsFound,
+          candidateImagesSelected: contentImageCandidates.length,
+          bodyCandidateImagesSelected,
+          ocrAttemptLimit: ocrCandidateLimit,
+          candidateSelectionReasons,
+          imageOcrAttempted,
+          imageOcrSucceeded,
+          imageOcrTextLength,
+          ocrStatus
+        }),
+        warnings: ocrWarnings
       });
     }
 
@@ -805,7 +897,7 @@ export async function importArticleContent(
         imageSignalsFound: chosenImageSummary.imageSignalsFound,
         candidateImagesSelected: contentImageCandidates.length,
         bodyCandidateImagesSelected,
-        ocrAttemptLimit: MAX_CANDIDATE_IMAGES,
+        ocrAttemptLimit: ocrCandidateLimit,
         candidateSelectionReasons,
         imageOcrAttempted,
         imageOcrSucceeded,

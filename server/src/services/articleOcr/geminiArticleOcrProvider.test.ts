@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockClient, loggerInfoMock, loggerErrorMock } = vi.hoisted(() => ({
   mockClient: {
@@ -34,6 +34,10 @@ describe("GeminiArticleOcrProvider", () => {
     vi.clearAllMocks();
     vi.stubEnv("GEMINI_API_KEY", "test-key");
     vi.stubEnv("ARTICLE_OCR_MODEL", "gemini-2.5-flash");
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("provider is available", () => {
@@ -174,68 +178,90 @@ describe("GeminiArticleOcrProvider", () => {
     expect(result.warnings[0].message).toContain("could not fetch");
   });
 
-  it("maps Gemini 429 errors to OCR_RATE_LIMITED", async () => {
+  it("retries a transient soft-rate-limit 429 when the provider retry delay stays within the interactive cap", async () => {
+    vi.useFakeTimers();
     const mockImagePayload = { base64: "mock-base64", mimeType: "image/png" };
     (fetchImageAsBase64 as any).mockResolvedValue(mockImagePayload);
-    const error = new Error("429 RESOURCE_EXHAUSTED: quota exceeded");
+    const error = new Error('429 Too Many Requests. RetryInfo retryDelay: "4s"');
     (error as Error & { status?: number }).status = 429;
-    mockClient.models.generateContent.mockRejectedValue(error);
+    mockClient.models.generateContent.mockRejectedValueOnce(error).mockResolvedValueOnce({
+      text: "Retry success text"
+    });
 
     const provider = new GeminiArticleOcrProvider();
-    const result = await provider.extractText({
+    const pending = provider.extractText({
       platform: "other",
       images: [{ url: "https://example.com/image.png", source: "content", width: null, height: null, alt: null }],
       originalUrl: "https://example.com/page",
       resolvedUrl: "https://example.com/page"
     });
+    await vi.runAllTimersAsync();
+    const result = await pending;
 
-    expect(result.warnings[0].code).toBe("OCR_RATE_LIMITED");
-    expect(result.warnings[0].message).toContain("429 TooManyRequests");
-    expect(result.warnings[0].message).toContain("remaining images in this import");
-    expect(loggerInfoMock).toHaveBeenCalledWith(
-      "OCR run completed",
+    expect(fetchImageAsBase64).toHaveBeenCalledTimes(2);
+    expect(mockClient.models.generateContent).toHaveBeenCalledTimes(2);
+    expect(result.succeededCount).toBe(1);
+    expect(result.warnings).toEqual([]);
+    expect(result.recognizedText).toContain("Retry success text");
+    expect(result.runMeta).toEqual(
       expect.objectContaining({
+        candidateCount: 1,
         attemptedCount: 1,
-        succeededCount: 0,
-        earlyStopped: true,
-        earlyStopAt: 1,
+        earlyStopped: false,
         remainingImagesSkipped: 0,
-        errorCounts: {
-          OCR_RATE_LIMITED: 1
-        }
+        errorCounts: {}
+      })
+    );
+    expect(loggerInfoMock).toHaveBeenCalledWith(
+      "OCR image retry scheduled",
+      expect.objectContaining({
+        imageOrdinal: 1,
+        warningCode: "OCR_RATE_LIMITED",
+        rateLimitKind: "soft_rate_limit",
+        providerRetryDelayMs: 4000,
+        effectiveRetryDelayMs: 4000,
+        shouldAbortBatch: false,
+        attempt: 1,
+        maxAttempts: 2
       })
     );
   });
 
-  it("maps Gemini 503 errors to OCR_SERVICE_UNAVAILABLE", async () => {
+  it("retries a transient Gemini 503 once before succeeding", async () => {
+    vi.useFakeTimers();
     const mockImagePayload = { base64: "mock-base64", mimeType: "image/png" };
     (fetchImageAsBase64 as any).mockResolvedValue(mockImagePayload);
     const error = new Error("503 ServiceUnavailable: high demand");
     (error as Error & { status?: number }).status = 503;
-    mockClient.models.generateContent.mockRejectedValue(error);
+    mockClient.models.generateContent.mockRejectedValueOnce(error).mockResolvedValueOnce({
+      text: "Recovered from service unavailable"
+    });
 
     const provider = new GeminiArticleOcrProvider();
-    const result = await provider.extractText({
+    const pending = provider.extractText({
       platform: "other",
       images: [{ url: "https://example.com/image.png", source: "content", width: null, height: null, alt: null }],
       originalUrl: "https://example.com/page",
       resolvedUrl: "https://example.com/page"
     });
+    await vi.runAllTimersAsync();
+    const result = await pending;
 
-    expect(result.warnings[0].code).toBe("OCR_SERVICE_UNAVAILABLE");
-    expect(result.warnings[0].message).toContain("503 ServiceUnavailable");
-    expect(result.warnings[0].message).toContain("remaining images in this import");
+    expect(fetchImageAsBase64).toHaveBeenCalledTimes(2);
+    expect(mockClient.models.generateContent).toHaveBeenCalledTimes(2);
+    expect(result.succeededCount).toBe(1);
+    expect(result.warnings).toEqual([]);
     expect(loggerInfoMock).toHaveBeenCalledWith(
-      "OCR run completed",
+      "OCR image retry scheduled",
       expect.objectContaining({
-        attemptedCount: 1,
-        succeededCount: 0,
-        earlyStopped: true,
-        earlyStopAt: 1,
-        remainingImagesSkipped: 0,
-        errorCounts: {
-          OCR_SERVICE_UNAVAILABLE: 1
-        }
+        imageOrdinal: 1,
+        warningCode: "OCR_SERVICE_UNAVAILABLE",
+        rateLimitKind: null,
+        providerRetryDelayMs: null,
+        effectiveRetryDelayMs: 3000,
+        shouldAbortBatch: false,
+        attempt: 1,
+        maxAttempts: 2
       })
     );
   });
@@ -348,10 +374,55 @@ describe("GeminiArticleOcrProvider", () => {
     );
   });
 
-  it("stops remaining OCR images after a Gemini 429", async () => {
+  it("does not stop the batch on the first retryable failure, but stops after repeated busy failures", async () => {
+    vi.useFakeTimers();
     const mockImagePayload = { base64: "mock-base64", mimeType: "image/png" };
     (fetchImageAsBase64 as any).mockResolvedValue(mockImagePayload);
-    const error = new Error("429 RESOURCE_EXHAUSTED: quota exceeded");
+    const error = new Error('429 Too Many Requests. RetryInfo retryDelay: "4s"');
+    (error as Error & { status?: number }).status = 429;
+    mockClient.models.generateContent.mockRejectedValue(error);
+
+    const provider = new GeminiArticleOcrProvider();
+    const pending = provider.extractText({
+      platform: "other",
+      images: [
+        { url: "https://example.com/image1.png", source: "content", width: null, height: null, alt: null },
+        { url: "https://example.com/image2.png", source: "content", width: null, height: null, alt: null },
+        { url: "https://example.com/image3.png", source: "content", width: null, height: null, alt: null }
+      ],
+      originalUrl: "https://example.com/page",
+      resolvedUrl: "https://example.com/page"
+    });
+    await vi.runAllTimersAsync();
+    const result = await pending;
+
+    expect(fetchImageAsBase64).toHaveBeenCalledTimes(4);
+    expect(mockClient.models.generateContent).toHaveBeenCalledTimes(4);
+    expect(result.attempted).toBe(2);
+    expect(result.imageResults).toHaveLength(2);
+    expect(result.warnings[0].code).toBe("OCR_RATE_LIMITED");
+    expect(result.warnings[1].code).toBe("OCR_RATE_LIMITED");
+    expect(result.warnings[1].message).toContain("remaining images in this import");
+    expect(loggerInfoMock).toHaveBeenCalledWith(
+      "OCR run completed",
+      expect.objectContaining({
+        candidateCount: 3,
+        attemptedCount: 2,
+        succeededCount: 0,
+        earlyStopped: true,
+        earlyStopAt: 2,
+        remainingImagesSkipped: 1,
+        errorCounts: {
+          OCR_RATE_LIMITED: 2
+        }
+      })
+    );
+  });
+
+  it("does not retry a hard quota 429 and aborts the current batch", async () => {
+    const mockImagePayload = { base64: "mock-base64", mimeType: "image/png" };
+    (fetchImageAsBase64 as any).mockResolvedValue(mockImagePayload);
+    const error = new Error("429 RESOURCE_EXHAUSTED: free tier quota exceeded");
     (error as Error & { status?: number }).status = 429;
     mockClient.models.generateContent.mockRejectedValue(error);
 
@@ -368,18 +439,26 @@ describe("GeminiArticleOcrProvider", () => {
 
     expect(fetchImageAsBase64).toHaveBeenCalledTimes(1);
     expect(mockClient.models.generateContent).toHaveBeenCalledTimes(1);
-    expect(result.attempted).toBe(1);
-    expect(result.imageResults).toHaveLength(1);
+    expect(loggerInfoMock).not.toHaveBeenCalledWith("OCR image retry scheduled", expect.anything());
     expect(result.warnings[0].code).toBe("OCR_RATE_LIMITED");
     expect(result.warnings[0].message).toContain("remaining images in this import");
     expect(loggerInfoMock).toHaveBeenCalledWith(
+      "OCR image failed",
+      expect.objectContaining({
+        warningCode: "OCR_RATE_LIMITED",
+        rateLimitKind: "hard_quota",
+        providerRetryDelayMs: null,
+        effectiveRetryDelayMs: null,
+        shouldAbortBatch: true,
+        stopRemaining: true
+      })
+    );
+    expect(loggerInfoMock).toHaveBeenCalledWith(
       "OCR run completed",
       expect.objectContaining({
-        candidateCount: 2,
         attemptedCount: 1,
-        succeededCount: 0,
         earlyStopped: true,
-        earlyStopAt: 1,
+        earlyStopReason: "OCR_RATE_LIMITED",
         remainingImagesSkipped: 1,
         errorCounts: {
           OCR_RATE_LIMITED: 1
@@ -388,11 +467,11 @@ describe("GeminiArticleOcrProvider", () => {
     );
   });
 
-  it("stops remaining OCR images after a Gemini 503", async () => {
+  it("does not retry a soft-rate-limit 429 when the provider retry delay is too long for interactive import", async () => {
     const mockImagePayload = { base64: "mock-base64", mimeType: "image/png" };
     (fetchImageAsBase64 as any).mockResolvedValue(mockImagePayload);
-    const error = new Error("503 ServiceUnavailable: high demand");
-    (error as Error & { status?: number }).status = 503;
+    const error = new Error('429 Too Many Requests. RetryInfo retryDelay: "24s"');
+    (error as Error & { status?: number }).status = 429;
     mockClient.models.generateContent.mockRejectedValue(error);
 
     const provider = new GeminiArticleOcrProvider();
@@ -408,22 +487,27 @@ describe("GeminiArticleOcrProvider", () => {
 
     expect(fetchImageAsBase64).toHaveBeenCalledTimes(1);
     expect(mockClient.models.generateContent).toHaveBeenCalledTimes(1);
-    expect(result.attempted).toBe(1);
-    expect(result.imageResults).toHaveLength(1);
-    expect(result.warnings[0].code).toBe("OCR_SERVICE_UNAVAILABLE");
+    expect(loggerInfoMock).not.toHaveBeenCalledWith("OCR image retry scheduled", expect.anything());
+    expect(result.warnings[0].code).toBe("OCR_RATE_LIMITED");
     expect(result.warnings[0].message).toContain("remaining images in this import");
+    expect(loggerInfoMock).toHaveBeenCalledWith(
+      "OCR image failed",
+      expect.objectContaining({
+        warningCode: "OCR_RATE_LIMITED",
+        rateLimitKind: "soft_rate_limit",
+        providerRetryDelayMs: 24000,
+        effectiveRetryDelayMs: null,
+        shouldAbortBatch: true,
+        stopRemaining: true
+      })
+    );
     expect(loggerInfoMock).toHaveBeenCalledWith(
       "OCR run completed",
       expect.objectContaining({
-        candidateCount: 2,
         attemptedCount: 1,
-        succeededCount: 0,
         earlyStopped: true,
-        earlyStopAt: 1,
-        remainingImagesSkipped: 1,
-        errorCounts: {
-          OCR_SERVICE_UNAVAILABLE: 1
-        }
+        earlyStopReason: "OCR_RATE_LIMITED",
+        remainingImagesSkipped: 1
       })
     );
   });

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import type { AnalyzeFeedback } from "../../types/api";
 import type { AnalyzeMode, Folder, RecordItem, Tag } from "../../types/domain";
 import { recordRepository } from "../../db/repositories/recordRepository";
 import { useAppI18n } from "../../hooks/useAppI18n";
@@ -17,6 +18,7 @@ import {
   getSafeMediaAsset
 } from "../../services/mediaAsset/mediaAssetMapper";
 import {
+  getAnalyzeReviewNotice,
   getAnalyzeErrorMessage,
   getFolderDisplayName
 } from "../../lib/i18n";
@@ -34,6 +36,7 @@ interface DetailPaneProps {
   record: RecordItem | null;
   folders: Folder[];
   tags: Tag[];
+  analyzeFeedback?: AnalyzeFeedback | null;
   onAnalyze: (record: RecordItem, mode: AnalyzeMode) => Promise<void>;
   onResumeTranscription?: (record: RecordItem) => Promise<ResumeTranscriptionOutcome>;
   onDeleteRecord: (record: RecordItem) => Promise<void>;
@@ -75,6 +78,7 @@ export function DetailPane({
   record,
   folders,
   tags,
+  analyzeFeedback = null,
   onAnalyze,
   onResumeTranscription,
   onDeleteRecord
@@ -237,6 +241,13 @@ export function DetailPane({
   const shouldPrioritizeAi = hasAnyAiResult;
   const canRunAnalyze = hasSourceContent && !isAnalyzePending;
   const showAiResultControls = Boolean(activeSlot);
+  const reviewNotice =
+    analyzeFeedback &&
+    analyzeFeedback.recordId === draft.id &&
+    analyzeFeedback.mode === activeMode &&
+    !activeSlot
+      ? getAnalyzeReviewNotice(analyzeFeedback, appLanguage)
+      : null;
 
   const handleCopyOriginalUrl = async () => {
     if (!originalUrl) {
@@ -347,14 +358,28 @@ export function DetailPane({
       }
 
       return (
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-          <p className="font-medium text-slate-700">
-            {hasSourceContent ? t.detail.noAiResult : t.detail.noAiResultNeedsSource}
-          </p>
-          <p className="mt-1">
-            {hasSourceContent ? t.detail.noAiResultDescription : t.detail.noAiResultNeedsSourceDescription}
-          </p>
-        </div>
+        reviewNotice ? (
+          <div
+            className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900"
+            data-testid="detail-ai-review-notice"
+          >
+            <p className="font-medium">{reviewNotice.title}</p>
+            <p className="mt-1">{reviewNotice.reason}</p>
+            {reviewNotice.action ? <p className="mt-2 text-amber-800">{reviewNotice.action}</p> : null}
+            {reviewNotice.sourceHint ? (
+              <p className="mt-2 text-xs text-amber-700">{reviewNotice.sourceHint}</p>
+            ) : null}
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+            <p className="font-medium text-slate-700">
+              {hasSourceContent ? t.detail.noAiResult : t.detail.noAiResultNeedsSource}
+            </p>
+            <p className="mt-1">
+              {hasSourceContent ? t.detail.noAiResultDescription : t.detail.noAiResultNeedsSourceDescription}
+            </p>
+          </div>
+        )
       );
     }
 
@@ -378,10 +403,6 @@ export function DetailPane({
                 }
               : null
         }
-        legend={{
-          primary: t.detail.legend.primary,
-          secondary: t.detail.legend.secondary
-        }}
       />
     );
   };
@@ -570,34 +591,31 @@ export function DetailPane({
           className="mb-4 flex flex-wrap items-start gap-3"
           data-testid="detail-ai-toolbar"
         >
-          <button
-            data-testid="detail-ai-primary-action"
-            className="inline-flex max-w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-center text-sm font-medium text-white whitespace-normal break-words disabled:cursor-not-allowed disabled:bg-slate-400"
-            disabled={!canRunAnalyze}
-            onClick={async () => {
-              if (!hasSourceContent) {
-                return;
-              }
-              setPendingAnalyzeMode(activeMode);
-              try {
-                await onAnalyze(draft, activeMode);
-              } finally {
-                setPendingAnalyzeMode(null);
-              }
-            }}
-            type="button"
-          >
-            {isAnalyzePending ? (
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-            ) : null}
-            {isAnalyzePending
-              ? t.detail.analyzingMode(pendingModeLabel)
-              : activeSlot
+          {!isAnalyzePending ? (
+            <button
+              data-testid="detail-ai-primary-action"
+              className="inline-flex max-w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-center text-sm font-medium text-white whitespace-normal break-words disabled:cursor-not-allowed disabled:bg-slate-400"
+              disabled={!canRunAnalyze}
+              onClick={async () => {
+                if (!hasSourceContent) {
+                  return;
+                }
+                setPendingAnalyzeMode(activeMode);
+                try {
+                  await onAnalyze(draft, activeMode);
+                } finally {
+                  setPendingAnalyzeMode(null);
+                }
+              }}
+              type="button"
+            >
+              {activeSlot
                 ? t.detail.retryAnalyze
                 : hasSourceContent
                   ? t.detail.startAnalyze
                   : t.detail.startAnalyzeAfterContent}
-          </button>
+            </button>
+          ) : null}
           {showAiResultControls ? (
             <div
               className="flex min-w-0 flex-[1_1_18rem] flex-wrap items-center gap-3"
@@ -642,7 +660,6 @@ export function DetailPane({
               ) : null}
             </div>
           ) : null}
-          {aiErrorMessage ? <span className="min-w-0 break-words text-sm text-rose-600">{aiErrorMessage}</span> : null}
         </div>
         {draft.aiStatus === "failed" && aiErrorMessage ? (
           <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">

@@ -13,6 +13,7 @@ export interface ArticleOcrRequest {
   originalUrl: string;
   resolvedUrl: string | null;
   images: ArticleOcrCandidateImage[];
+  discoveredImageCount?: number;
 }
 
 export interface ArticleOcrImageResult {
@@ -25,6 +26,16 @@ export interface ArticleOcrImageResult {
   warningMessage?: string | null;
 }
 
+export interface ArticleOcrRunMeta {
+  discoveredImageCount: number;
+  candidateCount: number;
+  attemptedCount: number;
+  remainingImagesSkipped: number;
+  earlyStopped: boolean;
+  earlyStopReason: ArticleImportWarningCode | null;
+  errorCounts: Partial<Record<ArticleImportWarningCode, number>>;
+}
+
 export interface ArticleOcrResult {
   attempted: number;
   providerAvailable: boolean;
@@ -33,6 +44,7 @@ export interface ArticleOcrResult {
   recognizedTextLength: number;
   warnings: ArticleImportWarning[];
   imageResults?: ArticleOcrImageResult[];
+  runMeta?: ArticleOcrRunMeta;
 }
 
 export interface ArticleOcrProvider {

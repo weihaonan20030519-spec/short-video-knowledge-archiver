@@ -8,12 +8,20 @@ describe("analyzeRecord", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       json: async () => ({
         success: true,
+        outcome: "resolved",
         data: {
           summary: "English summary",
           bullets: ["One", "Two", "Three"]
         },
         error: null,
+        review: null,
         meta: {
+          mode: "learning",
+          source: "model",
+          decision: {
+            routeAction: "call_model",
+            reasonCode: "model_required"
+          },
           generatedAt: "2026-04-05T12:00:00.000Z"
         }
       })

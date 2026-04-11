@@ -44,6 +44,7 @@ describe("CreateRecordLinkSection", () => {
       linkImport: {
         title: "链接辅助导入",
         description: "通过链接提取内容。",
+        idleHint: "输入链接后，可在这里查看提取结果、缺口和提示。",
         trigger: "尝试提取链接内容"
       },
       bilibiliImport: {
@@ -68,6 +69,20 @@ describe("CreateRecordLinkSection", () => {
     onTriggerImport: () => undefined
   };
 
+  it("shows a lightweight placeholder before any link import attempt", () => {
+    render(
+      <CreateRecordLinkSection
+        {...baseProps}
+        hasAttemptedImport={false}
+        importResult={null}
+      />
+    );
+
+    expect(screen.getByTestId("link-import-empty-panel")).toBeInTheDocument();
+    expect(screen.getByText("输入链接后，可在这里查看提取结果、缺口和提示。")).toBeInTheDocument();
+    expect(screen.queryByTestId("link-import-result-panel")).not.toBeInTheDocument();
+  });
+
   it("keeps a single primary result block for full link imports", () => {
     render(
       <CreateRecordLinkSection
@@ -80,6 +95,7 @@ describe("CreateRecordLinkSection", () => {
 
     const resultPanel = screen.getByTestId("link-import-result-panel");
     expect(screen.getAllByTestId("link-import-result-panel")).toHaveLength(1);
+    expect(screen.queryByTestId("link-import-empty-panel")).not.toBeInTheDocument();
     expect(within(resultPanel).getByText("已提取到可整理正文。")).toBeInTheDocument();
     expect(screen.queryByTestId("link-import-helper-message")).not.toBeInTheDocument();
     expect(screen.queryByTestId("link-import-warning-group")).not.toBeInTheDocument();
@@ -102,6 +118,7 @@ describe("CreateRecordLinkSection", () => {
 
     const resultPanel = screen.getByTestId("link-import-result-panel");
     expect(screen.getAllByTestId("link-import-result-panel")).toHaveLength(1);
+    expect(screen.queryByTestId("link-import-empty-panel")).not.toBeInTheDocument();
     expect(within(resultPanel).getByText("已提取网页文本，但仍有图片内容未覆盖。")).toBeInTheDocument();
     expect(within(resultPanel).getByTestId("link-import-helper-message")).toBeInTheDocument();
     expect(within(resultPanel).getByTestId("link-import-warning-group")).toBeInTheDocument();
@@ -124,6 +141,7 @@ describe("CreateRecordLinkSection", () => {
     );
 
     expect(screen.getAllByTestId("link-import-result-panel")).toHaveLength(1);
+    expect(screen.queryByTestId("link-import-empty-panel")).not.toBeInTheDocument();
     expect(screen.getByTestId("link-import-helper-message")).toBeInTheDocument();
     expect(screen.getByTestId("link-import-warning-group")).toBeInTheDocument();
   });

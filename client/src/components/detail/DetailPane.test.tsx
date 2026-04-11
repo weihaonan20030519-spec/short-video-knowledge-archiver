@@ -8,6 +8,7 @@ import { createLearningAiSlot } from "../../lib/aiTransform";
 import { recordRepository } from "../../db/repositories/recordRepository";
 import { useSettingsStore } from "../../stores/settingsStore";
 import type { ResumeTranscriptionOutcome } from "../../lib/transcriptionResume";
+import type { AnalyzeFeedback } from "../../types/api";
 import type { RecordItem } from "../../types/domain";
 
 function mockResizeObserverWidth(width: number) {
@@ -90,10 +91,12 @@ describe("DetailPane AI knowledge view", () => {
     expect(coreSection).not.toBeNull();
     expect(coreSection).toHaveTextContent("先明确目标，再拆步骤");
 
-    const primaryMark = within(coreSection as HTMLElement).getByText("明确目标").closest("mark");
-    expect(primaryMark).not.toBeNull();
-    expect(primaryMark).toHaveClass("bg-amber-100");
-    expect(within(coreSection as HTMLElement).queryByText("再拆步骤")).toBeNull();
+    const emphasisMark = within(coreSection as HTMLElement).getByText("先明确目标").closest("mark");
+    expect(emphasisMark).not.toBeNull();
+    expect(emphasisMark).toHaveClass("bg-amber-100/85");
+    expect(coreSection).toHaveTextContent("先明确目标，再拆步骤。");
+    expect(within(coreSection as HTMLElement).queryByTestId("learning-emphasis-fallback")).not.toBeInTheDocument();
+    expect(within(coreSection as HTMLElement).queryByTestId("learning-quote-highlight")).not.toBeInTheDocument();
   });
 
   it("still renders learning output cleanly when no highlights are provided", () => {
@@ -394,7 +397,7 @@ describe("DetailPane AI knowledge view", () => {
     );
 
     const headerChips = screen.getByTestId("detail-header-chips");
-    expect(headerChips).toHaveTextContent("待修正文稿");
+    expect(headerChips).toHaveTextContent("整理待复核");
     expect(headerChips).toHaveTextContent("浏览器导入");
     expect(headerChips).toHaveTextContent("小红书");
     expect(headerChips).toHaveTextContent("需复查");
@@ -420,7 +423,7 @@ describe("DetailPane AI knowledge view", () => {
     );
 
     const headerChips = screen.getByTestId("detail-header-chips");
-    expect(headerChips).toHaveTextContent("待修正文稿");
+    expect(headerChips).toHaveTextContent("整理待复核");
     expect(headerChips).toHaveTextContent("粘贴文本");
     expect(headerChips).not.toHaveTextContent("其他");
     expect(headerChips).not.toHaveTextContent("未知");
@@ -522,6 +525,127 @@ describe("DetailPane AI knowledge view", () => {
     expect(screen.getByTestId("detail-segmented-control-layout")).toHaveClass("flex-wrap", "max-w-full");
     expect(screen.getByRole("button", { name: "阅读视图" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "编辑结果" })).toBeInTheDocument();
+  });
+
+  it("shows a review notice when the current mode needs review and has no renderable output", () => {
+    const record = createRecord({
+      currentMode: "learning",
+      aiStatus: "needs_review",
+      originalContent: "这里有正文，但当前还不足以稳定生成学习版结果。",
+      aiOutputs: {
+        concise: null,
+        learning: null
+      }
+    });
+    const analyzeFeedback: AnalyzeFeedback = {
+      recordId: record.id,
+      mode: "learning",
+      generatedAt: "2026-04-09T12:00:00.000Z",
+      source: "local",
+      review: {
+        reasonCode: "source_text_needs_review",
+        recommendedAction: "edit_source_text"
+      }
+    };
+
+    render(
+      <DetailPane
+        record={record}
+        folders={[createFolder({ id: "folder-ai-review", name: "研究素材" })]}
+        tags={[]}
+        analyzeFeedback={analyzeFeedback}
+        onAnalyze={vi.fn().mockResolvedValue(undefined)}
+        onDeleteRecord={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    const notice = screen.getByTestId("detail-ai-review-notice");
+    expect(within(notice).getByText("这次先不生成整理结果")).toBeInTheDocument();
+    expect(
+      within(notice).getByText("当前原文还不足以稳定生成这一模式的整理结果，建议先补充或澄清原文。")
+    ).toBeInTheDocument();
+    expect(within(notice).getByText("建议先补充原文，再重新整理。")).toBeInTheDocument();
+    expect(within(notice).getByText("这次由本地决策先拦截，尚未调用模型。")).toBeInTheDocument();
+    expect(screen.queryByText("还没有该模式的整理结果。")).not.toBeInTheDocument();
+    expect(screen.queryByText("点击“开始整理”生成内容。")).not.toBeInTheDocument();
+  });
+
+  it("hides the review notice when the current mode already has a renderable result", () => {
+    const record = createRecord({
+      currentMode: "learning",
+      aiStatus: "needs_review",
+      aiOutputs: {
+        concise: null,
+        learning: createLearningAiSlot(
+          {
+            coreConclusion: "已有正式结果。",
+            logicFramework: ["先看正式结果"],
+            keyDetails: ["不要并列展示 review notice"],
+            reusablePoints: ["结果优先"]
+          },
+          "2026-04-02T10:00:00.000Z"
+        )
+      }
+    });
+    const analyzeFeedback: AnalyzeFeedback = {
+      recordId: record.id,
+      mode: "learning",
+      generatedAt: "2026-04-09T12:00:00.000Z",
+      source: "local",
+      review: {
+        reasonCode: "source_text_needs_review",
+        recommendedAction: "edit_source_text"
+      }
+    };
+
+    render(
+      <DetailPane
+        record={record}
+        folders={[createFolder({ id: "folder-ai-review-hidden", name: "研究素材" })]}
+        tags={[]}
+        analyzeFeedback={analyzeFeedback}
+        onAnalyze={vi.fn().mockResolvedValue(undefined)}
+        onDeleteRecord={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    expect(screen.queryByTestId("detail-ai-review-notice")).not.toBeInTheDocument();
+    expect(screen.getByText("已有正式结果。")).toBeInTheDocument();
+  });
+
+  it("does not show the review notice when feedback belongs to a different mode", () => {
+    const record = createRecord({
+      currentMode: "concise",
+      aiStatus: "needs_review",
+      originalContent: "这里有正文，但当前模式与反馈模式不同。",
+      aiOutputs: {
+        concise: null,
+        learning: null
+      }
+    });
+    const analyzeFeedback: AnalyzeFeedback = {
+      recordId: record.id,
+      mode: "learning",
+      generatedAt: "2026-04-09T12:00:00.000Z",
+      source: "local",
+      review: {
+        reasonCode: "source_text_needs_review",
+        recommendedAction: "edit_source_text"
+      }
+    };
+
+    render(
+      <DetailPane
+        record={record}
+        folders={[createFolder({ id: "folder-ai-review-mode", name: "研究素材" })]}
+        tags={[]}
+        analyzeFeedback={analyzeFeedback}
+        onAnalyze={vi.fn().mockResolvedValue(undefined)}
+        onDeleteRecord={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    expect(screen.queryByTestId("detail-ai-review-notice")).not.toBeInTheDocument();
   });
 
   it("keeps the ai workspace header and controls compact-friendly in english", () => {
@@ -998,10 +1122,9 @@ describe("DetailPane AI knowledge view", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "重新整理" }));
 
-    expect(screen.getByRole("button", { name: "正在整理学习版…" })).toBeDisabled();
+    expect(screen.queryByTestId("detail-ai-primary-action")).not.toBeInTheDocument();
     const loadingNotice = screen.getByTestId("learning-loading-notice");
     expect(within(loadingNotice).getByText("当前结果已保留")).toBeInTheDocument();
-    expect(within(loadingNotice).queryByText("正在整理学习版…")).not.toBeInTheDocument();
     expect(within(loadingNotice).getByText("正在生成新的学习版结果，请稍候。")).toBeInTheDocument();
     expect(screen.getByText("先从结论开始。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "简洁版" })).toBeDisabled();
@@ -1030,7 +1153,7 @@ describe("DetailPane AI knowledge view", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "正在整理学习版…" })).toBeDisabled();
+    expect(screen.queryByTestId("detail-ai-primary-action")).not.toBeInTheDocument();
     const skeleton = screen.getByTestId("ai-knowledge-skeleton");
     expect(within(skeleton).getByText("请稍候")).toBeInTheDocument();
     expect(within(skeleton).getByText("正在生成学习版结果，请稍候。")).toBeInTheDocument();
@@ -1067,7 +1190,7 @@ describe("DetailPane AI knowledge view", () => {
     );
 
     expect(screen.getByText("本次整理失败，当前结果已保留。")).toBeInTheDocument();
-    expect(screen.getAllByText("AI 请求失败，请检查服务状态后重试。")).toHaveLength(2);
+    expect(screen.getAllByText("AI 请求失败，请检查服务状态后重试。")).toHaveLength(1);
     expect(screen.getByText("旧结果依然可读。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重新整理" })).toBeEnabled();
   });
