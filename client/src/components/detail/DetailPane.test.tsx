@@ -46,7 +46,7 @@ afterEach(() => {
 });
 
 describe("DetailPane AI knowledge view", () => {
-  it("renders learning output as sections with highlights", () => {
+  it("renders learning output as sections without highlight chrome", () => {
     const folder = createFolder({ id: "folder-1", name: "研究素材" });
     const tag = createTag({ id: "tag-1", name: "方法" });
     const record = createRecord({
@@ -90,11 +90,9 @@ describe("DetailPane AI knowledge view", () => {
     const coreSection = screen.getByRole("heading", { name: "核心结论" }).closest("section");
     expect(coreSection).not.toBeNull();
     expect(coreSection).toHaveTextContent("先明确目标，再拆步骤");
-
-    const emphasisMark = within(coreSection as HTMLElement).getByText("先明确目标").closest("mark");
-    expect(emphasisMark).not.toBeNull();
-    expect(emphasisMark).toHaveClass("bg-amber-100/85");
     expect(coreSection).toHaveTextContent("先明确目标，再拆步骤。");
+    expect(coreSection?.querySelector("mark")).toBeNull();
+    expect(coreSection?.querySelector("blockquote")).toBeNull();
     expect(within(coreSection as HTMLElement).queryByTestId("learning-emphasis-fallback")).not.toBeInTheDocument();
     expect(within(coreSection as HTMLElement).queryByTestId("learning-quote-highlight")).not.toBeInTheDocument();
   });

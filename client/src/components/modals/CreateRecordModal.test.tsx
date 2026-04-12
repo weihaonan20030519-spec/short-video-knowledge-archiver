@@ -155,7 +155,9 @@ describe("CreateRecordModal upload flow", () => {
 
     expect(screen.getByRole("button", { name: "Upload File" })).toBeInTheDocument();
     expect(screen.getByText("Upload Video or Audio")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Start Blank" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Type or paste text" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start Blank" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "空白新建" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Paste link" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Browser import (Beta)" })).toBeInTheDocument();
 
@@ -342,7 +344,7 @@ describe("CreateRecordModal upload flow", () => {
     await user.upload(screen.getByLabelText("选择视频或音频文件"), file);
     expect(await screen.findByText("转写完成")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "空白新建" }));
+    await user.click(screen.getByRole("button", { name: "输入或粘贴文本" }));
 
     expect(screen.queryByTestId("upload-status-card")).not.toBeInTheDocument();
     expect(screen.getByDisplayValue("音频标题")).toBeInTheDocument();

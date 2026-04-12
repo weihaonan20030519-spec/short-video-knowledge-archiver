@@ -10,7 +10,6 @@ export type CreateRecordUiMode =
 export const CREATE_RECORD_UI_MODE_ORDER: CreateRecordUiMode[] = [
   "upload",
   "paste_text",
-  "blank",
   "paste_link",
   "browser_import"
 ];

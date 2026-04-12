@@ -234,11 +234,11 @@ type Dictionary = {
   modals: {
     createRecordEyebrow: string;
     createRecordTitle: string;
-    inputMethods: {
-      upload: string;
-      link: string;
-      text: string;
-      manual: string;
+      inputMethods: {
+        upload: string;
+        link: string;
+        text: string;
+        manual: string;
     };
     modeHelpers: Record<
       "upload" | "paste_text" | "blank" | "paste_link" | "browser_import",
@@ -618,12 +618,12 @@ export const messages: Record<AppLanguage, Dictionary> = {
       inputMethods: {
         upload: "上传文件",
         link: "粘贴链接",
-        text: "粘贴文本",
+        text: "输入或粘贴文本",
         manual: "空白新建"
       },
       modeHelpers: {
         upload: "上传单个音视频文件，并在转写完成后继续编辑原始内容。",
-        paste_text: "粘贴已有文本、字幕或笔记，直接进入后续整理。",
+        paste_text: "输入或粘贴已有文本、字幕或笔记，直接进入后续整理。",
         blank: "从空白开始写一条记录，适合先记下线索，再逐步补全内容。",
         paste_link: "链接模式会先尝试提取内容。",
         browser_import: "通过浏览器扩展辅助导入当前页面上下文，再检查并补全文本内容。"
@@ -701,10 +701,10 @@ export const messages: Record<AppLanguage, Dictionary> = {
       content: "原始内容 / 字幕 / 备注",
       manualContent: "原始内容（可稍后补充）",
       blankContentLabel: "起始内容",
-      pasteTextContentLabel: "粘贴文本",
+      pasteTextContentLabel: "输入或粘贴文本",
       contentPlaceholder: "AI 只能基于这里的文本整理。链接模式下也建议补充正文、字幕或笔记。",
       blankContentPlaceholder: "从空白开始写下你当前掌握的线索、片段或问题。",
-      pasteTextContentPlaceholder: "粘贴已有文本、字幕、摘录或笔记，AI 会基于这里的内容继续整理。",
+      pasteTextContentPlaceholder: "输入或粘贴已有文本、字幕、摘录或笔记，AI 会基于这里的内容继续整理。",
       linkContentPlaceholder: "可补充正文、字幕或笔记。当前链接模式下，AI 仍主要基于这里的文本整理。",
       repairShortcut: {
         title: "导入内容还有缺口",
@@ -1065,12 +1065,12 @@ export const messages: Record<AppLanguage, Dictionary> = {
       inputMethods: {
         upload: "Upload File",
         link: "Paste link",
-        text: "Paste text",
+        text: "Type or paste text",
         manual: "Start Blank"
       },
       modeHelpers: {
         upload: "Upload a single media file and continue editing once the transcript is ready.",
-        paste_text: "Paste existing text, subtitles, or notes and move straight into organization.",
+        paste_text: "Type or paste existing text, subtitles, or notes and move straight into organization.",
         blank: "Start from an empty note when you only have a lead and want to fill in the source text later.",
         paste_link: "Link mode will try to extract content first.",
         browser_import: "Use the browser extension to bring page context back into the archiver, then review and complete the text."
@@ -1148,10 +1148,10 @@ export const messages: Record<AppLanguage, Dictionary> = {
       content: "Source content / subtitles / notes",
       manualContent: "Source content (optional for now)",
       blankContentLabel: "Starting notes",
-      pasteTextContentLabel: "Pasted text",
+      pasteTextContentLabel: "Type or paste text",
       contentPlaceholder: "AI only uses the text here. Even in link mode, it helps to paste notes, subtitles, or source text.",
       blankContentPlaceholder: "Start from a blank note and capture the clues, fragments, or questions you already have.",
-      pasteTextContentPlaceholder: "Paste existing text, subtitles, excerpts, or notes. AI will organize what you provide here.",
+      pasteTextContentPlaceholder: "Type or paste existing text, subtitles, excerpts, or notes. AI will organize what you provide here.",
       linkContentPlaceholder: "Add body text, subtitles, or notes here. In link mode, AI still depends mainly on this text.",
       repairShortcut: {
         title: "This import still has gaps",

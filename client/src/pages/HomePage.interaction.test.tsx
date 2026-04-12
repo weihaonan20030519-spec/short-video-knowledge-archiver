@@ -9,6 +9,7 @@ import { createFolder, createRecord, createTag } from "../test/factories";
 
 afterEach(() => {
   useSettingsStore.getState().setAppLanguage("zh-CN");
+  window.localStorage.removeItem(APP_LANGUAGE_STORAGE_KEY);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -713,8 +714,8 @@ describe("HomePage interactions", () => {
 
     expect(await screen.findByRole("button", { name: "Upload File" })).toBeInTheDocument();
     expect(screen.getByText("Upload Video or Audio")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Paste text" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Start Blank" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Type or paste text" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start Blank" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Paste link" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Browser import (Beta)" })).toBeInTheDocument();
   });
