@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../utils/errors.js";
-import { prepareAnalyzeInput } from "./analyzeService.js";
+import { analyzeContent, prepareAnalyzeInput } from "./analyzeService.js";
+import type { AnalysisProvider } from "./transcription/analysisProvider.js";
 
 describe("prepareAnalyzeInput", () => {
   it("trims raw text", () => {
@@ -82,5 +83,35 @@ describe("prepareAnalyzeInput", () => {
     );
 
     expect(input.appLanguage).toBe("zh-CN");
+  });
+
+  it("keeps the provider input rawText unchanged after audit logging is added", async () => {
+    const provider: AnalysisProvider = {
+      name: "analysis-mock",
+      analyze: vi.fn(async () => ({
+        summary: "摘要",
+        bullets: ["一", "二", "三"]
+      }))
+    };
+
+    await analyzeContent(
+      {
+        mode: "concise",
+        appLanguage: "zh-CN",
+        title: "标题",
+        sourcePlatform: "xiaohongshu",
+        originalUrl: null,
+        rawText:
+          "真正重点是先判断，再总结，而不是只抽显眼句。 [图片文字补充] 图中文字补充说明了额外证据。"
+      },
+      provider
+    );
+
+    expect(provider.analyze).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawText:
+          "真正重点是先判断，再总结，而不是只抽显眼句。 [图片文字补充] 图中文字补充说明了额外证据。"
+      })
+    );
   });
 });

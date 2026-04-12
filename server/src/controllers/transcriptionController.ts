@@ -35,7 +35,9 @@ export function createTranscriptionController(options: CreateTranscriptionContro
         const transcriptionMeta =
           error.details &&
           (typeof error.details.transcriptionModelUsed === "string" ||
-            Array.isArray(error.details.transcriptionModelAttempts))
+            Array.isArray(error.details.transcriptionModelAttempts) ||
+            typeof error.details.phase === "string" ||
+            typeof error.details.failureStage === "string")
             ? {
                 transcriptionModelUsed:
                   typeof error.details.transcriptionModelUsed === "string"
@@ -43,7 +45,12 @@ export function createTranscriptionController(options: CreateTranscriptionContro
                     : undefined,
                 transcriptionModelAttempts: Array.isArray(error.details.transcriptionModelAttempts)
                   ? error.details.transcriptionModelAttempts.filter((item): item is string => typeof item === "string")
-                  : undefined
+                  : undefined,
+                phase: typeof error.details.phase === "string" ? error.details.phase : "failed",
+                failureStage:
+                  typeof error.details.failureStage === "string"
+                    ? error.details.failureStage
+                    : undefined
               }
             : undefined;
 

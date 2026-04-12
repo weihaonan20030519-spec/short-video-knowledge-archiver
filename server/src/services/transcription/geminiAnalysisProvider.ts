@@ -4,16 +4,19 @@ import type { AnalysisProvider } from "./analysisProvider.js";
 import {
   conciseOutputJsonSchema,
   conciseOutputSchema,
-  learningOutputJsonSchema,
-  learningOutputSchema,
-  type AnalyzeRequest,
-  type ConciseOutput,
-  type LearningOutput
+  learningInternalOutputJsonSchema,
+  learningInternalOutputSchema
 } from "../../schemas/analyzeSchemas.js";
+import type {
+  AnalyzeRequest,
+  ConciseOutput,
+  LearningOutput
+} from "../../../../shared/src/analysis/analyzeContracts.js";
 import { buildConcisePrompt } from "../../prompts/concisePrompt.js";
 import { buildLearningPrompt } from "../../prompts/learningPrompt.js";
+import { mapLearningInternalOutput } from "../analysis/mapLearningInternalOutput.js";
 import { ApiError } from "../../utils/errors.js";
-import { requireGeminiKey, resolveAnalyzeModel } from "../../utils/env.js";
+import { requireGeminiKey, resolveGeminiAnalyzeModel } from "../../utils/env.js";
 
 function parseJsonContent(content: string) {
   try {
@@ -29,7 +32,7 @@ export class GeminiAnalysisProvider implements AnalysisProvider {
   async analyze(input: AnalyzeRequest): Promise<ConciseOutput | LearningOutput> {
     const prompt = input.mode === "concise" ? buildConcisePrompt(input) : buildLearningPrompt(input);
     const responseJsonSchema =
-      input.mode === "concise" ? conciseOutputJsonSchema : learningOutputJsonSchema;
+      input.mode === "concise" ? conciseOutputJsonSchema : learningInternalOutputJsonSchema;
 
     const client = new GoogleGenAI({
       apiKey: requireGeminiKey("analysis")
@@ -37,7 +40,7 @@ export class GeminiAnalysisProvider implements AnalysisProvider {
 
     const result = await client.models
       .generateContent({
-        model: resolveAnalyzeModel(input.mode),
+        model: resolveGeminiAnalyzeModel(input.mode),
         contents: prompt.userPrompt,
         config: {
           temperature: 0.2,
@@ -62,10 +65,21 @@ export class GeminiAnalysisProvider implements AnalysisProvider {
 
     const json = parseJsonContent(content);
 
-    const validated =
-      input.mode === "concise"
-        ? conciseOutputSchema.safeParse(json)
-        : learningOutputSchema.safeParse(json);
+    if (input.mode === "concise") {
+      const validated = conciseOutputSchema.safeParse(json);
+
+      if (!validated.success) {
+        throw new ApiError(
+          "AI_RESPONSE_INVALID",
+          "Gemini response did not match the required schema",
+          502
+        );
+      }
+
+      return validated.data;
+    }
+
+    const validated = learningInternalOutputSchema.safeParse(json);
 
     if (!validated.success) {
       throw new ApiError(
@@ -75,6 +89,6 @@ export class GeminiAnalysisProvider implements AnalysisProvider {
       );
     }
 
-    return validated.data;
+    return mapLearningInternalOutput(validated.data);
   }
 }

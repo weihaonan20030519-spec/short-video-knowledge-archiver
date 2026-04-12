@@ -1,14 +1,14 @@
 import {
-  analyzeRequestSchema,
-  type AnalyzeRequest
+  analyzeRequestSchema
 } from "../schemas/analyzeSchemas.js";
+import type { AnalyzeRequest, AnalyzeResponse } from "../../../shared/src/analysis/analyzeContracts.js";
 import type { AnalysisProvider } from "./transcription/analysisProvider.js";
 import { ApiError } from "../utils/errors.js";
 import { env } from "../utils/env.js";
-
-function sanitizeRawText(rawText: string) {
-  return rawText.replace(/\s+/g, " ").trim();
-}
+import { normalizeAnalyzeRawText } from "./analysis/cache/cacheKeys.js";
+import { createAnalysisOrchestrator } from "./analysis/analysisOrchestrator.js";
+import { buildAnalyzeInputAudit, summarizeAnalyzeInputAudit } from "./analysis/inputAudit.js";
+import { logger } from "../utils/logger.js";
 
 function getAnalyzeErrorMessage(
   code: "RAW_TEXT_REQUIRED" | "TEXT_TOO_SHORT",
@@ -39,7 +39,7 @@ export function prepareAnalyzeInput(payload: unknown, minRawTextLength = env.MIN
 
   const input: AnalyzeRequest = {
     ...parsed.data,
-    rawText: sanitizeRawText(parsed.data.rawText)
+    rawText: normalizeAnalyzeRawText(parsed.data.rawText)
   };
 
   if (!input.rawText) {
@@ -63,5 +63,15 @@ export function prepareAnalyzeInput(payload: unknown, minRawTextLength = env.MIN
 
 export async function analyzeContent(payload: unknown, provider: AnalysisProvider) {
   const input = prepareAnalyzeInput(payload);
-  return provider.analyze(input);
+  const inputAudit = buildAnalyzeInputAudit({
+    rawText: input.rawText
+  });
+  logger.info("Analyze input audit computed", {
+    mode: input.mode,
+    sourcePlatform: input.sourcePlatform,
+    provider: provider.name,
+    audit: summarizeAnalyzeInputAudit(inputAudit)
+  });
+  const orchestrator = createAnalysisOrchestrator({ provider });
+  return orchestrator.analyze(input);
 }

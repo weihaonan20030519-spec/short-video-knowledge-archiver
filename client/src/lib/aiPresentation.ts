@@ -5,13 +5,28 @@ import type {
   LearningOutput,
   TextHighlight
 } from "../types/domain";
+import {
+  decideHighlightRenderMode,
+  type EmphasisSpan,
+  type FallbackEmphasis,
+  type HighlightSectionKey,
+  type HighlightRenderMode,
+  type QuoteHighlight
+} from "./highlight";
+
+export interface KnowledgeSectionItem {
+  sentence: string;
+  mode: HighlightRenderMode;
+  quoteHighlight: QuoteHighlight | null;
+  emphasisSpans: EmphasisSpan[];
+  fallbackEmphasis: FallbackEmphasis | null;
+  coverageFallback: FallbackEmphasis | null;
+}
 
 export interface KnowledgeSection {
   key: string;
   title: string;
-  items: string[];
-  highlights: TextHighlight[];
-  fallbackTone: HighlightTone;
+  items: KnowledgeSectionItem[];
 }
 
 function splitOnSentence(text: string) {
@@ -59,27 +74,47 @@ function dedupeHighlights(highlights: TextHighlight[]) {
   });
 }
 
-function fallbackHighlights(items: string[], tone: HighlightTone) {
-  const warnings = /注意|不要|避免|风险|限制|前提|条件|warning|risk|avoid|must|should not|be careful|unless|if\b/i;
-  const semanticClause = /[^。！？!?；;\n]+[。！？!?；;]?/g;
+function buildSectionItems(
+  items: string[],
+  rawHighlights: TextHighlight[],
+  fallbackTone: HighlightTone,
+  sectionKey: HighlightSectionKey
+): KnowledgeSectionItem[] {
+  const normalizedRawHighlights = dedupeHighlights(rawHighlights);
 
-  return items
-    .slice(0, 4)
-    .flatMap<TextHighlight>((item) => {
-      const clauses = item.match(semanticClause)?.map((clause) => clause.trim()).filter(Boolean) || [];
-      const warningClause = clauses.find((clause) => warnings.test(clause));
+  const preliminaryItems = items.map((item) => {
+    return {
+      sentence: item,
+      ...decideHighlightRenderMode(item, normalizedRawHighlights, fallbackTone, sectionKey)
+    };
+  });
 
-      if (warningClause) {
-        return [{ text: warningClause, tone: "warning" }];
-      }
+  let signalDrought = 0;
 
-      const bestClause = clauses.find((clause) => clause.length >= 10);
-      if (!bestClause) {
-        return [];
-      }
+  return preliminaryItems.map((item) => {
+    const hasPrimarySignal = Boolean(
+      item.quoteHighlight || item.emphasisSpans.length > 0 || item.fallbackEmphasis
+    );
 
-      return [{ text: bestClause, tone }];
-    });
+    if (hasPrimarySignal) {
+      signalDrought = 0;
+      return item;
+    }
+
+    signalDrought += 1;
+
+    if (signalDrought >= 2 && item.coverageFallback) {
+      signalDrought = 0;
+
+      return {
+        ...item,
+        mode: "emphasis" as const,
+        fallbackEmphasis: item.coverageFallback
+      };
+    }
+
+    return item;
+  });
 }
 
 export function buildKnowledgeSections(
@@ -103,22 +138,12 @@ export function buildKnowledgeSections(
       {
         key: "summary",
         title: labels.summary,
-        items: summaryItems,
-        highlights: dedupeHighlights([
-          ...(concise.highlights?.summary || []),
-          ...fallbackHighlights(summaryItems, "core")
-        ]),
-        fallbackTone: "core"
+        items: buildSectionItems(summaryItems, concise.highlights?.summary || [], "core", "summary")
       },
       {
         key: "bullets",
         title: labels.bullets,
-        items: bulletItems,
-        highlights: dedupeHighlights([
-          ...(concise.highlights?.bullets || []),
-          ...fallbackHighlights(bulletItems, "action")
-        ]),
-        fallbackTone: "action"
+        items: buildSectionItems(bulletItems, concise.highlights?.bullets || [], "action", "bullets")
       }
     ];
 
@@ -135,42 +160,22 @@ export function buildKnowledgeSections(
     {
       key: "coreConclusion",
       title: labels.coreConclusion,
-      items: coreConclusion,
-      highlights: dedupeHighlights([
-        ...(learning.highlights?.coreConclusion || []),
-        ...fallbackHighlights(coreConclusion, "core")
-      ]),
-      fallbackTone: "core"
+      items: buildSectionItems(coreConclusion, learning.highlights?.coreConclusion || [], "core", "coreConclusion")
     },
     {
       key: "logicFramework",
       title: labels.logicFramework,
-      items: logicFramework,
-      highlights: dedupeHighlights([
-        ...(learning.highlights?.logicFramework || []),
-        ...fallbackHighlights(logicFramework, "method")
-      ]),
-      fallbackTone: "method"
+      items: buildSectionItems(logicFramework, learning.highlights?.logicFramework || [], "method", "logicFramework")
     },
     {
       key: "keyDetails",
       title: labels.keyDetails,
-      items: keyDetails,
-      highlights: dedupeHighlights([
-        ...(learning.highlights?.keyDetails || []),
-        ...fallbackHighlights(keyDetails, "warning")
-      ]),
-      fallbackTone: "warning"
+      items: buildSectionItems(keyDetails, learning.highlights?.keyDetails || [], "warning", "keyDetails")
     },
     {
       key: "reusablePoints",
       title: labels.reusablePoints,
-      items: reusablePoints,
-      highlights: dedupeHighlights([
-        ...(learning.highlights?.reusablePoints || []),
-        ...fallbackHighlights(reusablePoints, "action")
-      ]),
-      fallbackTone: "action"
+      items: buildSectionItems(reusablePoints, learning.highlights?.reusablePoints || [], "action", "reusablePoints")
     }
   ];
 

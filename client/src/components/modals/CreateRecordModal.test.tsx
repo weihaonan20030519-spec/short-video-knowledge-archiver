@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CreateRecordModal } from "./CreateRecordModal";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -12,6 +12,12 @@ vi.mock("../../services/transcription/transcriptionClient", () => ({
   transcribeFile: vi.fn()
 }));
 
+afterEach(() => {
+  useSettingsStore.getState().setAppLanguage("zh-CN");
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => {
@@ -22,6 +28,30 @@ function deferred<T>() {
 }
 
 describe("CreateRecordModal upload flow", () => {
+  it("keeps the create-record shell aligned with the shared modal rhythm while static hints stay low-emphasis", () => {
+    const { container } = render(
+      <CreateRecordModal
+        open
+        folders={[createFolder({ id: "folder-shell", name: "研究素材" })]}
+        tags={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    const overlay = container.firstElementChild as HTMLDivElement;
+    const shell = screen.getByTestId("create-record-modal-shell");
+    const modeHint = screen.getByTestId("create-record-mode-hint");
+    const uploadPlaceholder = screen.getByTestId("create-record-upload-placeholder");
+
+    expect(overlay).not.toHaveClass("backdrop-blur-sm");
+    expect(shell).toHaveClass("shadow-[0_14px_30px_rgba(15,23,42,0.08)]");
+    expect(modeHint).toHaveClass("bg-slate-100/70", "text-xs", "text-slate-500");
+    expect(modeHint).not.toHaveClass("border");
+    expect(uploadPlaceholder).toHaveClass("bg-slate-100/80");
+    expect(uploadPlaceholder).not.toHaveClass("border");
+  });
+
   it("fills the existing content field from transcription and submits through the same original content path", async () => {
     const folder = createFolder({ id: "folder-1", name: "研究素材" });
     const onSubmit = vi.fn().mockResolvedValue(undefined);
@@ -30,6 +60,7 @@ describe("CreateRecordModal upload flow", () => {
     mockedTranscribeFile.mockResolvedValue({
       success: true,
       data: {
+        phase: "transcript_ready",
         sourceType: "audio",
         suggestedTitle: "方法课音频",
         transcriptText: "这是转写后的正文，会直接进入唯一的原始内容编辑区。",
@@ -64,23 +95,30 @@ describe("CreateRecordModal upload flow", () => {
 
     expect(screen.getByRole("button", { name: "上传文件" })).toBeInTheDocument();
     expect(screen.getByText("上传视频或音频")).toBeInTheDocument();
+    expect(screen.getByText("本地归档目录")).toBeInTheDocument();
     expect(container.querySelectorAll("textarea")).toHaveLength(1);
 
     await user.upload(screen.getByLabelText("选择视频或音频文件"), file);
 
-    expect(await screen.findByTestId("upload-status-card")).toBeInTheDocument();
-    expect(screen.getByText("文件名")).toBeInTheDocument();
-    expect(screen.getByText("lesson.mp3")).toBeInTheDocument();
-    expect(screen.getByText("文件类型")).toBeInTheDocument();
-    expect(screen.getByText("音频")).toBeInTheDocument();
-    expect(screen.getByText("文件大小")).toBeInTheDocument();
+    const uploadStatusCard = await screen.findByTestId("upload-status-card");
+    expect(uploadStatusCard).toBeInTheDocument();
+    expect(within(uploadStatusCard).getByText("文件名")).toBeInTheDocument();
+    expect(within(uploadStatusCard).getAllByText("lesson.mp3").length).toBeGreaterThan(0);
+    expect(within(uploadStatusCard).getByText("文件类型")).toBeInTheDocument();
+    expect(within(uploadStatusCard).getAllByText("音频").length).toBeGreaterThan(0);
+    expect(within(uploadStatusCard).getByText("文件大小")).toBeInTheDocument();
     expect(await screen.findByText("转写完成")).toBeInTheDocument();
     expect(screen.getByText("转写完成，已自动填入原始内容区。")).toBeInTheDocument();
-    expect(screen.getByText("转写模型: Gemini 2.5 Flash")).toBeInTheDocument();
+    expect(
+      within(uploadStatusCard).getAllByText((_, element) =>
+        element?.tagName === "P" && element.textContent === "转写模型: Gemini 2.5 Flash"
+      ).length
+    ).toBeGreaterThan(0);
     expect(screen.getByDisplayValue("方法课音频")).toBeInTheDocument();
 
     const contentField = screen.getByRole("textbox", { name: "原始转写文本" }) as HTMLTextAreaElement;
     expect(contentField.value).toBe("这是转写后的正文，会直接进入唯一的原始内容编辑区。");
+    expect(contentField).toHaveClass("whitespace-pre-wrap", "break-words");
     expect(container.querySelectorAll("textarea")).toHaveLength(1);
 
     await user.click(screen.getByRole("button", { name: "创建记录" }));
@@ -90,11 +128,7 @@ describe("CreateRecordModal upload flow", () => {
         expect.objectContaining({
           inputMethod: "upload",
           title: "方法课音频",
-          content: "这是转写后的正文，会直接进入唯一的原始内容编辑区。"
-        }),
-        null,
-        expect.objectContaining({
-          transcriptText: "这是转写后的正文，会直接进入唯一的原始内容编辑区。"
+          originalContent: "这是转写后的正文，会直接进入唯一的原始内容编辑区。"
         })
       );
     });
@@ -121,7 +155,9 @@ describe("CreateRecordModal upload flow", () => {
 
     expect(screen.getByRole("button", { name: "Upload File" })).toBeInTheDocument();
     expect(screen.getByText("Upload Video or Audio")).toBeInTheDocument();
-    expect(screen.getByText("Other import methods")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start Blank" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Paste link" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Browser import (Beta)" })).toBeInTheDocument();
 
     await user.upload(screen.getByLabelText("Select a video or audio file"), file);
 
@@ -183,6 +219,7 @@ describe("CreateRecordModal upload flow", () => {
     pending.resolve({
       success: true,
       data: {
+        phase: "transcript_ready",
         sourceType: "video",
         suggestedTitle: "Demo Video",
         transcriptText: "Transcript body",
@@ -226,6 +263,8 @@ describe("CreateRecordModal upload flow", () => {
         message: "Timed out waiting for Gemini file processing"
       },
       meta: {
+        phase: "failed",
+        failureStage: "transcription",
         transcriptionModelUsed: "gemini-2.5-flash-lite",
         transcriptionModelAttempts: ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
       }
@@ -257,7 +296,330 @@ describe("CreateRecordModal upload flow", () => {
         element.textContent === "Transcription Model Attempts: Gemini 2.5 Flash → Gemini 2.5 Flash Lite"
       )
     ).toBeInTheDocument();
+    expect(screen.getByText("Failure Stage: Transcription")).toBeInTheDocument();
     expect(screen.getAllByText("Processing timed out. Please retry.").length).toBeGreaterThan(0);
     expect(screen.getByText("You Can Continue Editing Manually")).toBeInTheDocument();
+  });
+
+  it("keeps shared fields while clearing upload runtime after switching modes", async () => {
+    const mockedTranscribeFile = vi.mocked(transcribeFile);
+    mockedTranscribeFile.mockResolvedValue({
+      success: true,
+      data: {
+        phase: "transcript_ready",
+        sourceType: "audio",
+        suggestedTitle: "音频标题",
+        transcriptText: "上传后的文本",
+        transcriptionStatus: "transcript_needs_review",
+        fileMeta: {
+          fileName: "clip.mp3",
+          mimeType: "audio/mpeg",
+          size: 1024
+        },
+        language: "zh-CN",
+        segments: [],
+        timestamps: [],
+        warnings: [],
+        transcriptionModelUsed: "gemini-2.5-flash",
+        transcriptionModelAttempts: ["gemini-2.5-flash"]
+      },
+      error: null
+    });
+
+    render(
+      <CreateRecordModal
+        open
+        folders={[createFolder({ id: "folder-keep", name: "收集箱" })]}
+        tags={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    const user = userEvent.setup();
+    const file = new File(["audio"], "clip.mp3", { type: "audio/mpeg" });
+
+    await user.upload(screen.getByLabelText("选择视频或音频文件"), file);
+    expect(await screen.findByText("转写完成")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "空白新建" }));
+
+    expect(screen.queryByTestId("upload-status-card")).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("音频标题")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("上传后的文本")).toBeInTheDocument();
+  });
+
+  it("only triggers paste-link extraction after the explicit CTA and autofills the form", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      json: async () => ({
+        success: true,
+        data: {
+          originalUrl: "https://www.xiaohongshu.com/explore/abc123",
+          resolvedUrl: "https://www.xiaohongshu.com/explore/abc123",
+          platform: "xiaohongshu",
+          title: "小红书图文笔记",
+          excerpt: "这是从链接里提取到的一段摘要。",
+          contentText:
+            "这是从链接里提取到的一段较完整正文，用来帮助后续 AI 整理，同时仍然允许用户继续补充自己的字幕、笔记或观察。\n这里继续补充更多细节、上下文、步骤说明和复盘提示，让内容长度稳定超过完整导入阈值，并且保留  多个空格。",
+          fetchSucceeded: true,
+          extractionMethod: "readability",
+          extractionReport: {
+            extractionSources: ["html_text"],
+            hasHtmlText: true,
+            hasImageOcrText: false,
+            htmlTextLength: 140,
+            imageSignalsFound: 5,
+            candidateImagesSelected: 2,
+            ocrAttemptLimit: 3,
+            candidateSelectionReasons: ["filtered_non_body_images"],
+            imageOcrAttempted: 0,
+            imageOcrSucceeded: 0,
+            imageOcrTextLength: 0,
+            ocrStatus: "provider_unavailable",
+            coverageLevel: "partial"
+          },
+          warnings: [
+            {
+              code: "OCR_PROVIDER_UNAVAILABLE",
+              message: "ocr unavailable"
+            }
+          ]
+        },
+        error: null
+      })
+    }));
+
+    render(
+      <CreateRecordModal
+        open
+        folders={[createFolder({ id: "folder-link", name: "收集箱" })]}
+        tags={[]}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "粘贴链接" }));
+    await user.type(screen.getByPlaceholderText("https://..."), "https://www.xiaohongshu.com/explore/abc123");
+
+    expect(screen.queryByText("正在尝试获取可导入内容…")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "尝试提取链接内容" }));
+
+    expect(
+      await screen.findByText(
+        "已提取网页文本；检测到页面还包含可能有信息的图片，但当前无法执行 OCR，因此未提取图片中的文字。"
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("检测到页面包含 5 张图片信号，当前仅纳入 2 张正文候选图，仍有 3 张未纳入本轮处理范围。")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("ocr unavailable")).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("小红书图文笔记")).toBeInTheDocument();
+    const contentField = screen.getByRole("textbox", { name: "原始内容 / 字幕 / 备注" }) as HTMLTextAreaElement;
+    expect(screen.getByRole("button", { name: "继续补正文" })).toBeInTheDocument();
+    expect(contentField.value).toContain("这是从链接里提取到的一段较完整正文");
+    expect(contentField.value).toContain("仍然允许用户继续补充自己的字幕、笔记或观察");
+    expect(contentField.value).toContain("\n这里继续补充更多细节、上下文、步骤说明和复盘提示，让内容长度稳定超过完整导入阈值，并且保留  多个空格。");
+    expect(contentField).toHaveClass("whitespace-pre-wrap", "break-words");
+
+    await user.click(screen.getByRole("button", { name: "继续补正文" }));
+
+    expect(contentField).toHaveFocus();
+  });
+
+  it("keeps paste-link and browser-import messaging separated", async () => {
+    render(
+      <CreateRecordModal
+        open
+        folders={[createFolder({ id: "folder-link-mode", name: "收集箱" })]}
+        tags={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "粘贴链接" }));
+
+    expect(screen.getByText("链接辅助导入")).toBeInTheDocument();
+    expect(screen.queryByText("浏览器导入已启动")).not.toBeInTheDocument();
+    expect(screen.queryByText("通过浏览器扩展辅助导入当前页面上下文，再检查并补全文本内容。")).not.toBeInTheDocument();
+  });
+
+  it("shows browser import notice only in browser mode and clears it after switching back to paste-link", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/import/browser-context/session") && init?.method === "POST") {
+        return {
+          json: async () => ({
+            success: true,
+            data: {
+              sessionToken: "browser-session-1",
+              expiresAt: "2026-04-11T12:00:00.000Z"
+            },
+            error: null
+          })
+        };
+      }
+
+      if (url.endsWith("/api/import/browser-context/session/browser-session-1")) {
+        return {
+          json: async () => ({
+            success: true,
+            data: {
+              sessionToken: "browser-session-1",
+              status: "pending",
+              expiresAt: "2026-04-11T12:00:00.000Z",
+              result: null
+            },
+            error: null
+          })
+        };
+      }
+
+      throw new Error(`Unexpected fetch url: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <CreateRecordModal
+        open
+        folders={[createFolder({ id: "folder-browser-switch", name: "收集箱" })]}
+        tags={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "浏览器导入（Beta）" }));
+
+    expect(await screen.findByText("浏览器导入已启动")).toBeInTheDocument();
+    expect(
+      screen.getByText("请前往当前 B 站视频页并点击侧载扩展，扩展会把页面上下文提交回归档器。")
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "粘贴链接" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("浏览器导入已启动")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("请前往当前 B 站视频页并点击侧载扩展，扩展会把页面上下文提交回归档器。")
+      ).not.toBeInTheDocument();
+    });
+
+    expect(screen.getByText("链接辅助导入")).toBeInTheDocument();
+  });
+
+  it("preserves user-edited fields on repeated paste-link imports unless the field still matches its last autofill snapshot", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        json: async () => ({
+          success: true,
+          data: {
+            originalUrl: "https://example.com/post-1",
+            resolvedUrl: "https://example.com/post-1",
+            platform: "other",
+            title: "第一次导入标题",
+            excerpt: null,
+            contentText: "第一次导入正文，长度足够长，适合后续整理。",
+            fetchSucceeded: true,
+            extractionMethod: "readability",
+            extractionReport: {
+              extractionSources: ["html_text"],
+              hasHtmlText: true,
+              hasImageOcrText: false,
+              htmlTextLength: 120,
+              imageSignalsFound: 0,
+              candidateImagesSelected: 0,
+              ocrAttemptLimit: 3,
+              candidateSelectionReasons: [],
+              imageOcrAttempted: 0,
+              imageOcrSucceeded: 0,
+              imageOcrTextLength: 0,
+              ocrStatus: "not_applicable",
+              coverageLevel: "full"
+            },
+            warnings: []
+          },
+          error: null
+        })
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({
+          success: true,
+          data: {
+            originalUrl: "https://example.com/post-2",
+            resolvedUrl: "https://example.com/post-2",
+            platform: "other",
+            title: "第二次导入标题",
+            excerpt: "第二次摘要",
+            contentText: "第二次导入正文，仍然足够长，但不应覆盖用户已经手改过的正文。",
+            fetchSucceeded: true,
+            extractionMethod: "readability",
+            extractionReport: {
+              extractionSources: ["html_text"],
+              hasHtmlText: true,
+              hasImageOcrText: false,
+              htmlTextLength: 110,
+              imageSignalsFound: 0,
+              candidateImagesSelected: 0,
+              ocrAttemptLimit: 3,
+              candidateSelectionReasons: [],
+              imageOcrAttempted: 0,
+              imageOcrSucceeded: 0,
+              imageOcrTextLength: 0,
+              ocrStatus: "not_applicable",
+              coverageLevel: "full"
+            },
+            warnings: []
+          },
+          error: null
+        })
+      });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <CreateRecordModal
+        open
+        folders={[createFolder({ id: "folder-link-retry", name: "收集箱" })]}
+        tags={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "粘贴链接" }));
+
+    const urlField = screen.getByPlaceholderText("https://...");
+    const titleField = screen.getByRole("textbox", { name: "标题（可选）" }) as HTMLInputElement;
+    const contentField = screen.getByRole("textbox", { name: "原始内容 / 字幕 / 备注" }) as HTMLTextAreaElement;
+
+    await user.type(urlField, "https://example.com/post-1");
+    await user.click(screen.getByRole("button", { name: "尝试提取链接内容" }));
+
+    await screen.findByDisplayValue("第一次导入标题");
+    expect(contentField.value).toContain("第一次导入正文");
+    expect(screen.queryByRole("button", { name: "继续补正文" })).not.toBeInTheDocument();
+
+    await user.clear(contentField);
+    await user.type(contentField, "这是用户手动修订后的正文，不应被后续导入覆盖。");
+    await user.clear(urlField);
+    await user.type(urlField, "https://example.com/post-2");
+    await user.click(screen.getByRole("button", { name: "尝试提取链接内容" }));
+
+    await waitFor(() => {
+      expect(titleField.value).toBe("第二次导入标题");
+      expect((screen.getByPlaceholderText("https://...") as HTMLInputElement).value).toBe("https://example.com/post-2");
+      expect(contentField.value).toBe("这是用户手动修订后的正文，不应被后续导入覆盖。");
+    });
   });
 });

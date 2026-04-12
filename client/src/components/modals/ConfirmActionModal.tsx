@@ -23,7 +23,7 @@ export function ConfirmActionModal({
   const { t } = useAppI18n();
 
   return (
-    <ModalShell open={open} title={title} description={description} onClose={onClose}>
+    <ModalShell open={open} title={title} description={description} onClose={onClose} showCloseButton={false}>
       <div className="flex justify-end gap-3">
         <button
           className="rounded-2xl bg-slate-100 px-4 py-3 text-sm font-medium text-slate-700"

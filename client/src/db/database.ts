@@ -8,6 +8,7 @@ import type {
   Tag,
   TranscriptionStatus
 } from "../types/domain";
+import { buildDefaultMediaAsset } from "../services/mediaAsset/mediaAssetMapper";
 
 function deriveSourceType(record: Partial<RecordItem>): SourceType {
   if (record.sourceType) {
@@ -45,6 +46,14 @@ function deriveContentCompleteness(record: Partial<RecordItem>): ContentComplete
 
 function deriveTranscriptionStatus(record: Partial<RecordItem>): TranscriptionStatus {
   return record.transcriptionStatus || "idle";
+}
+
+function deriveReviewLater(record: Partial<RecordItem>) {
+  return record.reviewLater === true;
+}
+
+function deriveMediaAsset(record: Partial<RecordItem>) {
+  return buildDefaultMediaAsset(record.mediaAsset || {});
 }
 
 export class KnowledgeArchiveDB extends Dexie {
@@ -114,6 +123,38 @@ export class KnowledgeArchiveDB extends Dexie {
 
           await Promise.all(legacySystemFolderIds.map((id) => tx.table("folders").delete(id)));
         }
+      });
+
+    this.version(4)
+      .stores({
+        records:
+          "id, createdAt, updatedAt, folderId, aiStatus, currentMode, sourceType, transcriptionStatus",
+        folders: "id, name, sortOrder",
+        tags: "id, name"
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table("records")
+          .toCollection()
+          .modify((record: Partial<RecordItem>) => {
+            record.mediaAsset = deriveMediaAsset(record);
+          });
+      });
+
+    this.version(5)
+      .stores({
+        records:
+          "id, createdAt, updatedAt, folderId, aiStatus, currentMode, sourceType, transcriptionStatus, reviewLater",
+        folders: "id, name, sortOrder",
+        tags: "id, name"
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table("records")
+          .toCollection()
+          .modify((record: Partial<RecordItem>) => {
+            record.reviewLater = deriveReviewLater(record);
+          });
       });
   }
 }

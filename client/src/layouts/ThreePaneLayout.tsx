@@ -96,6 +96,44 @@ function getDesktopPaneSpace(containerWidth: number) {
   return Math.max(containerWidth - HANDLE_WIDTH_PX * 2, MIN_WIDTHS.sidebar + MIN_WIDTHS.list + MIN_WIDTHS.detail);
 }
 
+function clampDragDelta(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function applyDesktopResizeDelta(
+  widths: DesktopPaneWidths,
+  handle: ResizeHandle,
+  deltaX: number,
+  paneSpace: number
+): DesktopPaneWidths {
+  const clampedStart = clampWidths(widths, paneSpace);
+  const detailWidth = Math.max(MIN_WIDTHS.detail, paneSpace - clampedStart.sidebar - clampedStart.list);
+
+  if (handle === "sidebar") {
+    const appliedDelta = clampDragDelta(
+      deltaX,
+      MIN_WIDTHS.sidebar - clampedStart.sidebar,
+      clampedStart.list - MIN_WIDTHS.list
+    );
+
+    return {
+      sidebar: clampedStart.sidebar + appliedDelta,
+      list: clampedStart.list - appliedDelta
+    };
+  }
+
+  const appliedDelta = clampDragDelta(
+    deltaX,
+    MIN_WIDTHS.list - clampedStart.list,
+    detailWidth - MIN_WIDTHS.detail
+  );
+
+  return {
+    sidebar: clampedStart.sidebar,
+    list: clampedStart.list + appliedDelta
+  };
+}
+
 export function ThreePaneLayout({
   sidebar,
   list,
@@ -177,16 +215,7 @@ export function ThreePaneLayout({
       const safeClientX = Number.isFinite(clientX) ? clientX : dragState.startX;
       const deltaX = safeClientX - dragState.startX;
       const paneSpace = getDesktopPaneSpace(measureContainerWidth());
-      const nextWidths =
-        dragState.handle === "sidebar"
-          ? {
-              ...dragState.widths,
-              sidebar: dragState.widths.sidebar + deltaX
-            }
-          : {
-              ...dragState.widths,
-              list: dragState.widths.list + deltaX
-            };
+      const nextWidths = applyDesktopResizeDelta(dragState.widths, dragState.handle, deltaX, paneSpace);
 
       setDesktopWidths(clampWidths(nextWidths, paneSpace));
     };

@@ -1,17 +1,20 @@
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import {
+  ANALYZE_MODES,
+  APP_LANGUAGES,
+  HIGHLIGHT_TONES,
+  SOURCE_PLATFORMS,
+  type AnalyzeRequest,
+  type ConciseOutput,
+  type LearningOutput
+} from "../../../shared/src/analysis/analyzeContracts.js";
 
-export const sourcePlatformSchema = z.enum([
-  "tiktok",
-  "bilibili",
-  "xiaohongshu",
-  "other",
-  "unknown"
-]);
+export const sourcePlatformSchema = z.enum(SOURCE_PLATFORMS);
 
-export const analyzeModeSchema = z.enum(["concise", "learning"]);
-export const appLanguageSchema = z.enum(["zh-CN", "en"]);
-export const highlightToneSchema = z.enum(["core", "method", "action", "warning"]);
+export const analyzeModeSchema = z.enum(ANALYZE_MODES);
+export const appLanguageSchema = z.enum(APP_LANGUAGES);
+export const highlightToneSchema = z.enum(HIGHLIGHT_TONES);
 
 export const textHighlightSchema = z.object({
   text: z.string().min(1),
@@ -58,11 +61,19 @@ export const learningOutputSchema = z.object({
     .optional()
 });
 
-const learningOutputForModelSchema = z.object({
+const learningLegacyOutputForModelSchema = z.object({
   coreConclusion: z.string(),
   logicFramework: z.array(z.string()),
   keyDetails: z.array(z.string()),
   reusablePoints: z.array(z.string())
+});
+
+export const learningInternalOutputSchema = z.object({
+  claimCore: z.string(),
+  claimContrast: z.string().nullable().optional(),
+  mechanismChain: z.array(z.string()),
+  decisiveEvidence: z.array(z.string()),
+  actionRules: z.array(z.string())
 });
 
 function normalizeJsonSchema(value: unknown): Record<string, unknown> {
@@ -111,9 +122,13 @@ export const conciseOutputJsonSchema = normalizeJsonSchema(
 );
 
 export const learningOutputJsonSchema = normalizeJsonSchema(
-  zodToJsonSchema(learningOutputForModelSchema, "LearningOutput")
+  zodToJsonSchema(learningInternalOutputSchema, "LearningInternalOutput")
+);
+export const learningInternalOutputJsonSchema = learningOutputJsonSchema;
+
+export const learningLegacyOutputJsonSchema = normalizeJsonSchema(
+  zodToJsonSchema(learningLegacyOutputForModelSchema, "LearningOutput")
 );
 
-export type AnalyzeRequest = z.infer<typeof analyzeRequestSchema>;
-export type ConciseOutput = z.infer<typeof conciseOutputSchema>;
-export type LearningOutput = z.infer<typeof learningOutputSchema>;
+export type { AnalyzeRequest, ConciseOutput, LearningOutput };
+export type LearningInternalOutput = z.infer<typeof learningInternalOutputSchema>;

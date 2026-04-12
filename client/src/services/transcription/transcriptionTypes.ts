@@ -1,5 +1,7 @@
 import type {
+  TranscriptionFailureStage,
   TranscriptionErrorCode,
+  TranscriptionPhase,
   TranscriptionSourceType,
   TranscriptionStatus
 } from "../../types/api";
@@ -28,6 +30,7 @@ export interface ClientTranscriptMeta {
 }
 
 export interface ClientTranscriptionResult {
+  phase: TranscriptionPhase;
   sourceType: TranscriptionSourceType;
   suggestedTitle: string;
   transcriptText: string;
@@ -41,6 +44,8 @@ export interface ClientTranscriptionResult {
 export interface ClientTranscriptionError {
   code: TranscriptionErrorCode;
   message: string;
+  phase?: Extract<TranscriptionPhase, "failed">;
+  failureStage?: TranscriptionFailureStage;
   transcriptionModelUsed?: string | null;
   transcriptionModelAttempts?: string[];
 }

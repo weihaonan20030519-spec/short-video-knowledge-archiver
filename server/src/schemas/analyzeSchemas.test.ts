@@ -7,7 +7,8 @@ describe("learningOutputJsonSchema", () => {
     const schemaText = JSON.stringify(learningOutputJsonSchema);
 
     expect(schemaText).not.toContain("#/definitions/");
-    expect(schemaText).toContain("\"coreConclusion\"");
+    expect(schemaText).toContain("\"claimCore\"");
+    expect(schemaText).toContain("\"mechanismChain\"");
     expect(schemaText).not.toContain("\"highlights\"");
   });
 });

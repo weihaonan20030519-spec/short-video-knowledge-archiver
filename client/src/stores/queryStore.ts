@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-type ActiveFilter = "all" | "recent" | "unorganized" | "needs_review";
+export type ActiveFilter = "all" | "recent" | "unorganized" | "not_started" | "needs_review" | "review_later";
 
 interface QueryState {
   activeFilter: ActiveFilter;

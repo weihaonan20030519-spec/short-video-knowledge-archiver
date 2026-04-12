@@ -20,7 +20,14 @@ export function useRecordFilters(records: RecordItem[], tags: Tag[], folders: Fo
         }
       }
 
-      if ((activeFilter === "unorganized" || activeFilter === "needs_review") && !matchesRecordStageFilter(record, activeFilter)) {
+      if (
+        (activeFilter === "unorganized" || activeFilter === "not_started" || activeFilter === "needs_review") &&
+        !matchesRecordStageFilter(record, activeFilter)
+      ) {
+        return false;
+      }
+
+      if (activeFilter === "review_later" && !record.reviewLater) {
         return false;
       }
 

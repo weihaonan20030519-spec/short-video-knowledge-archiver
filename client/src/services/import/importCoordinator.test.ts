@@ -55,6 +55,40 @@ function createBilibiliPayload(overrides: Partial<{
   };
 }
 
+function createArticleExtractionReport(overrides: Partial<{
+  extractionSources: Array<"html_text" | "meta_excerpt" | "image_ocr">;
+  hasHtmlText: boolean;
+  hasImageOcrText: boolean;
+  htmlTextLength: number;
+  imageSignalsFound: number;
+  candidateImagesSelected: number;
+  ocrAttemptLimit: number;
+  candidateSelectionReasons: Array<"limited_by_cap" | "filtered_non_body_images" | "partial_page_signals_only">;
+  imageOcrAttempted: number;
+  imageOcrSucceeded: number;
+  imageOcrFailed: number;
+  imageOcrTextLength: number;
+  ocrStatus: "not_applicable" | "not_attempted" | "provider_unavailable" | "attempted_no_text" | "partial" | "successful";
+  coverageLevel: "full" | "partial" | "limited" | "minimal";
+}> = {}) {
+  return {
+    extractionSources: overrides.extractionSources ?? ["html_text"],
+    hasHtmlText: overrides.hasHtmlText ?? true,
+    hasImageOcrText: overrides.hasImageOcrText ?? false,
+    htmlTextLength: overrides.htmlTextLength ?? 180,
+    imageSignalsFound: overrides.imageSignalsFound ?? 0,
+    candidateImagesSelected: overrides.candidateImagesSelected ?? 0,
+    ocrAttemptLimit: overrides.ocrAttemptLimit ?? 3,
+    candidateSelectionReasons: overrides.candidateSelectionReasons ?? [],
+    imageOcrAttempted: overrides.imageOcrAttempted ?? 0,
+    imageOcrSucceeded: overrides.imageOcrSucceeded ?? 0,
+    imageOcrFailed: overrides.imageOcrFailed ?? Math.max(0, (overrides.imageOcrAttempted ?? 0) - (overrides.imageOcrSucceeded ?? 0)),
+    imageOcrTextLength: overrides.imageOcrTextLength ?? 0,
+    ocrStatus: overrides.ocrStatus ?? "not_applicable",
+    coverageLevel: overrides.coverageLevel ?? "full"
+  };
+}
+
 describe("importCoordinator", () => {
   it("maps manual text with enough content to a complete import result", async () => {
     const session = await resolveImport({
@@ -70,7 +104,40 @@ describe("importCoordinator", () => {
     expect(deriveImportFlowState(session.result)).toBe("ready_complete");
   });
 
-  it("maps unsupported links to needs_user_input without blocking creation", async () => {
+  it("maps meta-only article imports to needs_user_input without blocking creation", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      json: async () => ({
+        success: true,
+        data: {
+          originalUrl: "https://example.com/article/123",
+          resolvedUrl: "https://example.com/article/123",
+          platform: "other",
+          title: "Example Article",
+          excerpt: "Only a short summary is available.",
+          contentText: "Only a short summary is available.",
+          fetchSucceeded: true,
+          extractionMethod: "meta_fallback",
+          extractionReport: createArticleExtractionReport({
+            extractionSources: ["meta_excerpt"],
+            hasHtmlText: false,
+            htmlTextLength: 0,
+            coverageLevel: "minimal"
+          }),
+          warnings: [
+            {
+              code: "META_ONLY",
+              message: "meta only"
+            },
+            {
+              code: "MANUAL_COMPLETION_REQUIRED",
+              message: "manual completion required"
+            }
+          ]
+        },
+        error: null
+      })
+    }));
+
     const session = await resolveImport({
       inputMethod: "link",
       originalUrl: "https://example.com/article/123",
@@ -79,8 +146,101 @@ describe("importCoordinator", () => {
 
     expect(session.result?.outcome).toBe("needs_user_input");
     expect(session.result?.canCreateRecord).toBe(true);
-    expect(session.result?.warnings.map((warning) => warning.code)).toContain("UNSUPPORTED_PLATFORM");
+    expect(session.result?.warnings.map((warning) => warning.code)).toEqual(["META_ONLY", "MANUAL_COMPLETION_REQUIRED"]);
     expect(deriveImportFlowState(session.result)).toBe("ready_manual_completion");
+  });
+
+  it("maps article import network failures to failed_but_creatable", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network failed")));
+
+    const session = await resolveImport({
+      inputMethod: "link",
+      originalUrl: "https://www.xiaohongshu.com/explore/abc123",
+      appLanguage: "zh-CN"
+    });
+
+    expect(session.result?.outcome).toBe("failed_but_creatable");
+    expect(session.result?.platform).toBe("other");
+    expect(session.result?.warnings.map((warning) => warning.code)).toContain("FETCH_FAILED");
+    expect(deriveImportFlowState(session.result)).toBe("error_but_can_continue");
+  });
+
+  it("maps blocked article targets to failed_but_creatable without pretending extraction succeeded", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      json: async () => ({
+        success: true,
+        data: {
+          originalUrl: "http://127.0.0.1/private",
+          resolvedUrl: "http://127.0.0.1/private",
+          platform: "unknown",
+          title: null,
+          excerpt: null,
+          contentText: null,
+          fetchSucceeded: false,
+          extractionMethod: "none",
+          extractionReport: createArticleExtractionReport({
+            extractionSources: [],
+            hasHtmlText: false,
+            htmlTextLength: 0,
+            coverageLevel: "minimal"
+          }),
+          warnings: [
+            {
+              code: "SECURITY_BLOCKED",
+              message: "blocked"
+            }
+          ]
+        },
+        error: null
+      })
+    }));
+
+    const session = await resolveImport({
+      inputMethod: "link",
+      originalUrl: "http://127.0.0.1/private",
+      appLanguage: "zh-CN"
+    });
+
+    expect(session.result?.outcome).toBe("failed_but_creatable");
+    expect(session.result?.warnings.map((warning) => warning.code)).toContain("SECURITY_BLOCKED");
+    expect(deriveImportFlowState(session.result)).toBe("error_but_can_continue");
+  });
+
+  it("preserves imageOcrFailed from article extraction report", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      json: async () => ({
+        success: true,
+        data: {
+          originalUrl: "https://example.com/article/failing-ocr",
+          resolvedUrl: "https://example.com/article/failing-ocr",
+          platform: "other",
+          title: "Example",
+          excerpt: "Example excerpt",
+          contentText: "Example content",
+          fetchSucceeded: true,
+          extractionMethod: "readability",
+          extractionReport: createArticleExtractionReport({
+            imageOcrAttempted: 3,
+            imageOcrSucceeded: 1,
+            imageOcrFailed: 2,
+            ocrStatus: "partial",
+            coverageLevel: "partial"
+          }),
+          warnings: []
+        },
+        error: null
+      })
+    }));
+
+    const session = await resolveImport({
+      inputMethod: "link",
+      originalUrl: "https://example.com/article/failing-ocr",
+      appLanguage: "zh-CN"
+    });
+
+    expect(session.result?.linkExtractionReport?.imageOcrFailed).toBe(2);
+    expect(session.result?.linkExtractionReport?.imageOcrAttempted).toBe(3);
+    expect(session.result?.linkExtractionReport?.imageOcrSucceeded).toBe(1);
   });
 
   it("maps a successful bilibili transcript import to complete and preserves import summary", async () => {
@@ -102,9 +262,219 @@ describe("importCoordinator", () => {
     expect(session.result?.contentCompleteness).toBe("full");
 
     expect(buildRecordImportSnapshot(session.result).importSummary).toEqual({
+      source: "link_bilibili_server",
       outcome: "complete",
       contentCompleteness: "full"
     });
+  });
+
+  it("preserves html and OCR source signals in the record import snapshot", () => {
+    const snapshot = buildRecordImportSnapshot({
+      source: "link_generic",
+      platform: "other",
+      outcome: "complete",
+      originalUrl: "https://example.com/article/full",
+      detectedTitle: "Article",
+      detectedContent: "完整正文",
+      contentCompleteness: "full",
+      availableTracks: [],
+      selectedTrackId: null,
+      warnings: [],
+      canCreateRecord: true,
+      shouldPromptManualInput: false,
+      linkExtractionReport: createArticleExtractionReport({
+        hasHtmlText: true,
+        hasImageOcrText: true,
+        extractionSources: ["html_text", "image_ocr"],
+        ocrStatus: "successful"
+      })
+    });
+
+    expect(snapshot.importSummary).toEqual({
+      source: "link_generic",
+      outcome: "complete",
+      contentCompleteness: "full",
+      sourceSignals: {
+        hasHtmlText: true,
+        hasImageOcrText: true
+      }
+    });
+  });
+
+  it("marks summary-only source signals only for explicit meta-only article imports", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      json: async () => ({
+        success: true,
+        data: {
+          originalUrl: "https://example.com/article/meta-only",
+          resolvedUrl: "https://example.com/article/meta-only",
+          platform: "other",
+          title: "Meta only article",
+          excerpt: "Only the summary is available.",
+          contentText: "Only the summary is available.",
+          fetchSucceeded: true,
+          extractionMethod: "meta_fallback",
+          extractionReport: createArticleExtractionReport({
+            extractionSources: ["meta_excerpt"],
+            hasHtmlText: false,
+            coverageLevel: "minimal"
+          }),
+          warnings: [
+            { code: "META_ONLY", message: "meta only" },
+            { code: "MANUAL_COMPLETION_REQUIRED", message: "manual completion required" }
+          ]
+        },
+        error: null
+      })
+    }));
+
+    const metaOnlySession = await resolveImport({
+      inputMethod: "link",
+      originalUrl: "https://example.com/article/meta-only",
+      appLanguage: "zh-CN"
+    });
+
+    expect(buildRecordImportSnapshot(metaOnlySession.result).importSummary).toEqual({
+      source: "link_generic",
+      outcome: "needs_user_input",
+      contentCompleteness: "empty",
+      sourceSignals: {
+        isSummaryOnly: true
+      }
+    });
+
+    const partialSnapshot = buildRecordImportSnapshot({
+      source: "link_generic",
+      platform: "other",
+      outcome: "partial",
+      originalUrl: "https://example.com/article/partial",
+      detectedTitle: "Article",
+      detectedContent: "正文偏短，但不是仅摘要。",
+      contentCompleteness: "partial",
+      availableTracks: [],
+      selectedTrackId: null,
+      warnings: [],
+      canCreateRecord: true,
+      shouldPromptManualInput: true,
+      linkExtractionReport: createArticleExtractionReport({
+        hasHtmlText: true,
+        hasImageOcrText: false,
+        coverageLevel: "partial"
+      })
+    });
+
+    expect(partialSnapshot.importSummary).toEqual({
+      source: "link_generic",
+      outcome: "partial",
+      contentCompleteness: "partial",
+      sourceSignals: {
+        hasHtmlText: true
+      }
+    });
+  });
+
+  it("keeps html-only imports with unresolved image coverage out of the complete state", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      json: async () => ({
+        success: true,
+        data: {
+          originalUrl: "https://www.xiaohongshu.com/explore/ocr-gap",
+          resolvedUrl: "https://www.xiaohongshu.com/explore/ocr-gap",
+          platform: "xiaohongshu",
+          title: "图文笔记",
+          excerpt: null,
+          contentText:
+            "这里已经提取到较长的网页正文，但页面里还有正文图片没有完成 OCR，所以这一轮不应该再被映射成 complete。这里继续补充足够长度的段落，确保纯文本长度本身已经超过完整阈值。",
+          fetchSucceeded: true,
+          extractionMethod: "readability",
+          extractionReport: createArticleExtractionReport({
+            extractionSources: ["html_text"],
+            htmlTextLength: 160,
+            imageSignalsFound: 4,
+            candidateImagesSelected: 2,
+            candidateSelectionReasons: ["filtered_non_body_images"],
+            ocrStatus: "provider_unavailable",
+            coverageLevel: "partial"
+          }),
+          warnings: [
+            {
+              code: "OCR_PROVIDER_UNAVAILABLE",
+              message: "ocr unavailable"
+            }
+          ]
+        },
+        error: null
+      })
+    }));
+
+    const session = await resolveImport({
+      inputMethod: "link",
+      originalUrl: "https://www.xiaohongshu.com/explore/ocr-gap",
+      appLanguage: "zh-CN"
+    });
+
+    expect(session.result?.outcome).toBe("partial");
+    expect(session.result?.contentCompleteness).toBe("partial");
+    expect(session.result?.platform).toBe("other");
+    expect(session.result?.linkExtractionReport?.ocrStatus).toBe("provider_unavailable");
+  });
+
+  it("normalizes OCR warning messages before they reach the UI", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      json: async () => ({
+        success: true,
+        data: {
+          originalUrl: "https://example.com/article/ocr-errors",
+          resolvedUrl: "https://example.com/article/ocr-errors",
+          platform: "other",
+          title: "Example",
+          excerpt: "Example excerpt",
+          contentText: "Example content",
+          fetchSucceeded: true,
+          extractionMethod: "readability",
+          extractionReport: createArticleExtractionReport({
+            extractionSources: ["html_text"],
+            htmlTextLength: 160,
+            ocrStatus: "provider_unavailable",
+            coverageLevel: "partial"
+          }),
+          warnings: [
+            {
+              code: "OCR_SERVICE_UNAVAILABLE",
+              message: "Image OCR hit a Gemini service availability issue (503 ServiceUnavailable)."
+            },
+            {
+              code: "OCR_RATE_LIMITED",
+              message: "Image OCR was rate limited by Gemini (429 TooManyRequests)."
+            },
+            {
+              code: "OCR_BAD_REQUEST",
+              message: "Image OCR was rejected because the current image input was not accepted (400 BadRequest)."
+            },
+            {
+              code: "OCR_UNKNOWN_ERROR",
+              message: "Image OCR failed because of an unexpected provider error: API Error."
+            }
+          ]
+        },
+        error: null
+      })
+    }));
+
+    const session = await resolveImport({
+      inputMethod: "link",
+      originalUrl: "https://example.com/article/ocr-errors",
+      appLanguage: "zh-CN"
+    });
+
+    const messages = session.result?.warnings.map((warning) => warning.message) ?? [];
+    expect(messages).toHaveLength(4);
+    expect(messages[0]).toContain("图片文字识别已中断");
+    expect(messages[0]).toContain("当前模型服务繁忙");
+    expect(messages[1]).toContain("图片文字识别已中断");
+    expect(messages[1]).toContain("当前请求过多");
+    expect(messages[2]).toContain("图片格式或输入暂不被稳定支持");
+    expect(messages[3]).toContain("OCR 处理出现异常");
   });
 
   it("keeps multi-track imports in awaiting_track_selection and marks weak content as needs_user_input", async () => {

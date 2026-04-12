@@ -1,7 +1,11 @@
+import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
 import type { Folder, Tag } from "../../types/domain";
 import { useAppI18n } from "../../hooks/useAppI18n";
+import { useElementWidthThreshold } from "../../hooks/useElementWidthThreshold";
 import { UNCATEGORIZED_RECORDS_VIEW_ID, isUncategorizedRecordsView } from "../../lib/folders";
 import { getFolderDisplayName, languageOptions } from "../../lib/i18n";
+import { getSidebarFilterPresentation } from "../../lib/status";
 import { useQueryStore } from "../../stores/queryStore";
 
 interface SidebarProps {
@@ -18,6 +22,15 @@ interface SidebarProps {
   onExportFolder: (folder: Folder) => void;
 }
 
+const twoLineClampStyle: CSSProperties = {
+  display: "-webkit-box",
+  WebkitBoxOrient: "vertical",
+  WebkitLineClamp: 2,
+  overflow: "hidden"
+};
+
+const SIDEBAR_HEADER_COMPACT_THRESHOLD_PX = 360;
+
 export function Sidebar(props: SidebarProps) {
   const { appLanguage, setAppLanguage, t } = useAppI18n();
   const { folders, tags, uncategorizedCount } = props;
@@ -32,6 +45,25 @@ export function Sidebar(props: SidebarProps) {
     setSelectedTagId,
     resetScopedFilters
   } = useQueryStore();
+  const unorganizedFilter = getSidebarFilterPresentation("unorganized", appLanguage);
+  const notStartedFilter = getSidebarFilterPresentation("not_started", appLanguage);
+  const needsReviewFilter = getSidebarFilterPresentation("needs_review", appLanguage);
+  const reviewLaterFilter = getSidebarFilterPresentation("review_later", appLanguage);
+  const [isUnorganizedBucketExpanded, setIsUnorganizedBucketExpanded] = useState(false);
+  const [sidebarHeaderRowRef, isLanguageSwitcherCompact] = useElementWidthThreshold<HTMLDivElement>(
+    SIDEBAR_HEADER_COMPACT_THRESHOLD_PX,
+    "max"
+  );
+  const hasFolders = folders.length > 0;
+  const hasMultipleFolders = folders.length > 1;
+  const hasTags = tags.length > 0;
+  const hasMultipleTags = tags.length > 1;
+
+  useEffect(() => {
+    if (activeFilter !== "not_started" && activeFilter !== "needs_review") {
+      setIsUnorganizedBucketExpanded(false);
+    }
+  }, [activeFilter]);
 
   const selectFolder = (folderId: string) => {
     setSelectedFolderId(folderId);
@@ -52,24 +84,49 @@ export function Sidebar(props: SidebarProps) {
     >
       <div className="shrink-0 space-y-5">
         <div>
-          <div className="flex items-start justify-between gap-3">
-            <div>
+          <div
+            ref={sidebarHeaderRowRef}
+            className={`items-start ${isLanguageSwitcherCompact ? "flex flex-col gap-2" : "flex flex-wrap gap-3"}`}
+            data-testid="sidebar-header-row"
+          >
+            <div className="min-w-0 flex-1">
               <p className="text-xs uppercase tracking-[0.32em] text-slate-400">{t.sidebar.title}</p>
-              <h1 className="mt-2 text-2xl font-semibold text-slate-50">{t.sidebar.subtitle}</h1>
+              <h1 className="mt-2 break-words text-2xl font-semibold text-slate-50">{t.sidebar.subtitle}</h1>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-1">
-              <p className="px-2 pb-1 text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                {t.app.languageLabel}
-              </p>
-              <div className="flex gap-1">
+            <div
+              className={`inline-flex max-w-full shrink-0 items-center rounded-xl border border-white/8 bg-white/[0.03] text-slate-300 ${
+                isLanguageSwitcherCompact ? "self-start px-1 py-1" : "ml-auto gap-2 px-2 py-1.5"
+              }`}
+              data-layout={isLanguageSwitcherCompact ? "compact" : "inline"}
+              data-testid="sidebar-language-switcher"
+            >
+              {isLanguageSwitcherCompact ? null : (
+                <p
+                  className="shrink-0 text-[10px] font-medium uppercase tracking-[0.14em] text-slate-500"
+                  data-testid="sidebar-language-switcher-label"
+                >
+                  {t.app.languageLabel}
+                </p>
+              )}
+              <div
+                className={`flex items-center rounded-lg bg-black/15 ${
+                  isLanguageSwitcherCompact ? "gap-0.5 p-0.5" : "gap-1 p-0.5"
+                }`}
+                data-testid="sidebar-language-switcher-controls"
+              >
                 {languageOptions.map((option) => (
                   <button
                     key={option.value}
-                    className={`rounded-xl px-3 py-1.5 text-xs font-medium transition ${
+                    className={`rounded-md font-medium transition ${
+                      isLanguageSwitcherCompact
+                        ? "min-w-[2.2rem] px-1.5 py-1 text-[11px] leading-none"
+                        : "min-w-[2.5rem] px-2.5 py-1.5 text-xs leading-none"
+                    } ${
                       appLanguage === option.value
                         ? "bg-slate-100 text-slate-950"
                         : "text-slate-300 hover:bg-white/10"
                     }`}
+                    data-testid={`sidebar-language-option-${option.value}`}
                     onClick={() => setAppLanguage(option.value)}
                     type="button"
                   >
@@ -90,7 +147,7 @@ export function Sidebar(props: SidebarProps) {
         </button>
 
         <input
-          className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
+          className="block w-full min-w-0 overflow-hidden rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white text-ellipsis whitespace-nowrap outline-none placeholder:text-slate-500"
           placeholder={t.sidebar.searchPlaceholder}
           value={searchQuery}
           onChange={(event) => setSearchQuery(event.target.value)}
@@ -100,8 +157,6 @@ export function Sidebar(props: SidebarProps) {
           {[
             { key: "all", label: t.sidebar.filters.all },
             { key: "recent", label: t.sidebar.filters.recent },
-            { key: "unorganized", label: t.sidebar.filters.unorganized },
-            { key: "needs_review", label: t.sidebar.filters.needsReview }
           ].map((item) => (
             <button
               key={item.key}
@@ -111,7 +166,7 @@ export function Sidebar(props: SidebarProps) {
                   : "border border-transparent bg-white/[0.04] text-slate-300 hover:border-white/10 hover:bg-white/[0.07]"
               }`}
               onClick={() => {
-                setActiveFilter(item.key as "all" | "recent" | "unorganized" | "needs_review");
+                setActiveFilter(item.key as "all" | "recent" | "unorganized" | "needs_review" | "review_later");
                 resetScopedFilters();
               }}
               type="button"
@@ -119,6 +174,91 @@ export function Sidebar(props: SidebarProps) {
               {item.label}
             </button>
           ))}
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <button
+                className={`flex min-w-0 flex-1 items-center justify-between rounded-2xl px-3 py-2 text-sm ${
+                  activeFilter === "unorganized"
+                    ? "bg-slate-100 text-slate-950"
+                    : "border border-transparent bg-white/[0.04] text-slate-300 hover:border-white/10 hover:bg-white/[0.07]"
+                }`}
+                data-testid="sidebar-status-bucket"
+                onClick={() => {
+                  setActiveFilter("unorganized");
+                  setIsUnorganizedBucketExpanded(false);
+                  resetScopedFilters();
+                }}
+                type="button"
+              >
+                {unorganizedFilter.label}
+              </button>
+              <button
+                aria-label={
+                  isUnorganizedBucketExpanded ? t.sidebar.collapseSubFilters : t.sidebar.expandSubFilters
+                }
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-slate-300 transition hover:border-white/20 hover:bg-white/[0.07]"
+                data-testid="sidebar-status-bucket-toggle"
+                onClick={() => setIsUnorganizedBucketExpanded((value) => !value)}
+                type="button"
+              >
+                <span className={`transition ${isUnorganizedBucketExpanded ? "rotate-90" : "rotate-0"}`}>
+                  ›
+                </span>
+              </button>
+            </div>
+
+            {isUnorganizedBucketExpanded ? (
+              <div className="ml-3 border-l border-white/10 pl-3">
+                <button
+                  className={`flex w-full items-center justify-between rounded-2xl px-3 py-2 text-sm transition ${
+                    activeFilter === "not_started"
+                      ? "bg-slate-100 text-slate-950"
+                      : "border border-transparent bg-white/[0.03] text-slate-300 hover:border-white/10 hover:bg-white/[0.06]"
+                  }`}
+                  data-testid="sidebar-status-child-filter-not-started"
+                  onClick={() => {
+                    setActiveFilter("not_started");
+                    resetScopedFilters();
+                  }}
+                  type="button"
+                >
+                  <span>{notStartedFilter.label}</span>
+                </button>
+                <button
+                  className={`flex w-full items-center justify-between rounded-2xl px-3 py-2 text-sm transition ${
+                    activeFilter === "needs_review"
+                      ? "bg-slate-100 text-slate-950"
+                      : "border border-transparent bg-white/[0.03] text-slate-300 hover:border-white/10 hover:bg-white/[0.06]"
+                  }`}
+                  data-testid="sidebar-status-child-filter"
+                  onClick={() => {
+                    setActiveFilter("needs_review");
+                    resetScopedFilters();
+                  }}
+                  type="button"
+                  >
+                  <span>{needsReviewFilter.label}</span>
+                </button>
+              </div>
+            ) : null}
+
+            <button
+              className={`flex w-full items-center justify-between rounded-2xl px-3 py-2 text-sm ${
+                activeFilter === "review_later"
+                  ? "bg-slate-100 text-slate-950"
+                  : "border border-transparent bg-white/[0.04] text-slate-300 hover:border-white/10 hover:bg-white/[0.07]"
+              }`}
+              data-testid="sidebar-status-review-later"
+              onClick={() => {
+                setActiveFilter("review_later");
+                resetScopedFilters();
+              }}
+              type="button"
+            >
+              {reviewLaterFilter.label}
+            </button>
+          </div>
         </div>
 
         <div>
@@ -143,23 +283,30 @@ export function Sidebar(props: SidebarProps) {
               }}
               type="button"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold">{t.common.systemFolder}</p>
-                  <p className="mt-2 text-xs leading-5 text-slate-300">{t.sidebar.systemFolderDescription}</p>
+              <div className="space-y-2">
+                <div className="flex items-start gap-3">
+                  <p className="min-w-0 flex-1 text-sm font-semibold leading-5 text-slate-100" style={twoLineClampStyle}>
+                    {t.common.systemFolder}
+                  </p>
+                  <span className="inline-flex h-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black/20 px-3 text-xs font-medium leading-none whitespace-nowrap">
+                    {t.sidebar.recordCount(uncategorizedCount)}
+                  </span>
                 </div>
-                <span className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-xs font-medium">
-                  {t.sidebar.recordCount(uncategorizedCount)}
-                </span>
+                <p
+                  className="min-w-0 text-xs leading-5 text-slate-300"
+                  style={twoLineClampStyle}
+                >
+                  {t.sidebar.systemFolderDescription}
+                </p>
               </div>
             </button>
           </div>
         </div>
       </div>
 
-      <div className="min-h-[18rem] min-w-0 shrink-0" data-testid="sidebar-collections-region">
-        <div className="flex min-h-[18rem] min-w-0 flex-col gap-5">
-          <div className="min-h-0 flex flex-1 flex-col">
+      <div className="min-w-0 shrink-0" data-testid="sidebar-collections-region">
+        <div className="min-w-0 space-y-5">
+          <div data-testid="sidebar-folders-section">
             <div className="mb-2 flex items-center justify-between">
               <h2 className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">{t.sidebar.folders}</h2>
               <button
@@ -170,63 +317,73 @@ export function Sidebar(props: SidebarProps) {
                 {t.sidebar.create}
               </button>
             </div>
-            <div className="min-h-0 flex-1 space-y-2">
-              {folders.map((folder) => (
-                <div
-                  key={folder.id}
-                  className={`cursor-pointer rounded-2xl border px-3 py-2 ${
-                    selectedFolderId === folder.id
-                      ? "border-white/20 bg-slate-100 text-slate-950"
-                      : "border-white/5 bg-white/[0.04] text-slate-200"
-                  }`}
-                  data-testid={`folder-item-${folder.id}`}
-                  onClick={() => selectFolder(folder.id)}
-                >
-                  <button
-                    className="w-full cursor-pointer text-left text-sm font-medium"
+            {!hasFolders ? (
+              <div
+                className="rounded-2xl border border-dashed border-white/8 px-3 py-3 text-xs leading-5 text-slate-400"
+                data-testid="sidebar-folders-empty"
+              >
+                <p className="font-medium text-slate-300">{t.sidebar.emptyFoldersTitle}</p>
+                <p className="mt-1 text-slate-500">{t.sidebar.emptyFoldersDescription}</p>
+              </div>
+            ) : (
+              <div className={hasMultipleFolders ? "space-y-2" : ""} data-testid="sidebar-folders-list">
+                {folders.map((folder) => (
+                  <div
+                    key={folder.id}
+                    className={`cursor-pointer rounded-2xl border px-3 py-2 ${
+                      selectedFolderId === folder.id
+                        ? "border-white/20 bg-slate-100 text-slate-950"
+                        : "border-white/5 bg-white/[0.04] text-slate-200"
+                    }`}
+                    data-testid={`folder-item-${folder.id}`}
                     onClick={() => selectFolder(folder.id)}
-                    type="button"
                   >
-                    {getFolderDisplayName(folder, appLanguage)}
-                  </button>
-                  <div className="mt-2 flex gap-2 text-[11px]">
                     <button
-                      className="text-slate-400 hover:text-slate-100"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        props.onExportFolder(folder);
-                      }}
+                      className="w-full cursor-pointer text-left text-sm font-medium"
+                      onClick={() => selectFolder(folder.id)}
                       type="button"
                     >
-                      {t.sidebar.export}
+                      {getFolderDisplayName(folder, appLanguage)}
                     </button>
-                    <button
-                      className="text-slate-400 hover:text-slate-100"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        props.onRenameFolder(folder);
-                      }}
-                      type="button"
-                    >
-                      {t.sidebar.rename}
-                    </button>
-                    <button
-                      className="text-rose-300 hover:text-rose-200"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        props.onDeleteFolder(folder);
-                      }}
-                      type="button"
-                    >
-                      {t.sidebar.delete}
-                    </button>
+                    <div className="mt-2 flex gap-2 text-[11px]">
+                      <button
+                        className="text-slate-400 hover:text-slate-100"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          props.onExportFolder(folder);
+                        }}
+                        type="button"
+                      >
+                        {t.sidebar.export}
+                      </button>
+                      <button
+                        className="text-slate-400 hover:text-slate-100"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          props.onRenameFolder(folder);
+                        }}
+                        type="button"
+                      >
+                        {t.sidebar.rename}
+                      </button>
+                      <button
+                        className="text-rose-300 hover:text-rose-200"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          props.onDeleteFolder(folder);
+                        }}
+                        type="button"
+                      >
+                        {t.sidebar.delete}
+                      </button>
+                    </div>
                   </div>
-                </div>
                 ))}
-            </div>
+              </div>
+            )}
           </div>
 
-          <div className="min-h-0 flex flex-1 flex-col">
+          <div data-testid="sidebar-tags-section">
             <div className="mb-2 flex items-center justify-between">
               <h2 className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">{t.sidebar.tags}</h2>
               <button
@@ -237,50 +394,56 @@ export function Sidebar(props: SidebarProps) {
                 {t.sidebar.create}
               </button>
             </div>
-            <div className="min-h-0 flex-1 space-y-2">
-              {tags.map((tag) => (
-                <div
-                  key={tag.id}
-                  className={`cursor-pointer rounded-2xl border px-3 py-2 ${
-                    selectedTagId === tag.id
-                      ? "border-white/20 bg-slate-100 text-slate-950"
-                      : "border-white/5 bg-white/[0.04] text-slate-200"
-                  }`}
-                  data-testid={`tag-item-${tag.id}`}
-                  onClick={() => selectTag(tag.id)}
-                >
-                  <button
-                    className="w-full cursor-pointer text-left text-sm font-medium"
+            {!hasTags ? (
+              <p className="px-1 text-xs leading-5 text-slate-500" data-testid="sidebar-tags-empty">
+                {t.sidebar.emptyTagsTitle}
+              </p>
+            ) : (
+              <div className={hasMultipleTags ? "space-y-2" : ""} data-testid="sidebar-tags-list">
+                {tags.map((tag) => (
+                  <div
+                    key={tag.id}
+                    className={`cursor-pointer rounded-2xl border px-3 py-2 ${
+                      selectedTagId === tag.id
+                        ? "border-white/20 bg-slate-100 text-slate-950"
+                        : "border-white/5 bg-white/[0.04] text-slate-200"
+                    }`}
+                    data-testid={`tag-item-${tag.id}`}
                     onClick={() => selectTag(tag.id)}
-                    type="button"
                   >
-                    #{tag.name}
-                  </button>
-                  <div className="mt-2 flex gap-2 text-[11px]">
                     <button
-                      className="text-slate-400 hover:text-slate-100"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        props.onRenameTag(tag);
-                      }}
+                      className="w-full cursor-pointer text-left text-sm font-medium"
+                      onClick={() => selectTag(tag.id)}
                       type="button"
                     >
-                      {t.sidebar.rename}
+                      #{tag.name}
                     </button>
-                    <button
-                      className="text-rose-300 hover:text-rose-200"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        props.onDeleteTag(tag);
-                      }}
-                      type="button"
-                    >
-                      {t.sidebar.delete}
-                    </button>
+                    <div className="mt-2 flex gap-2 text-[11px]">
+                      <button
+                        className="text-slate-400 hover:text-slate-100"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          props.onRenameTag(tag);
+                        }}
+                        type="button"
+                      >
+                        {t.sidebar.rename}
+                      </button>
+                      <button
+                        className="text-rose-300 hover:text-rose-200"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          props.onDeleteTag(tag);
+                        }}
+                        type="button"
+                      >
+                        {t.sidebar.delete}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

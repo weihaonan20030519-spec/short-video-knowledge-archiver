@@ -18,13 +18,10 @@ import { folderRepository } from "../db/repositories/folderRepository";
 import { recordRepository } from "../db/repositories/recordRepository";
 import { tagRepository } from "../db/repositories/tagRepository";
 import { analyzeRecord } from "../services/aiService";
-import { buildRecordImportSnapshot } from "../services/import/importCoordinator";
-import type { ImportResult } from "../services/import/importTypes";
-import type { ClientTranscriptionResult } from "../services/transcription/transcriptionTypes";
-import { buildRecordTitle } from "../lib/title";
+import type { CreateRecordDraft } from "../features/create-record/buildCreateRecordDraft";
+import { buildRecordImportSnapshot, resolveImport } from "../services/import/importCoordinator";
 import { isDuplicateFolderName, isDuplicateTagName, normalizeCollectionName } from "../lib/collection";
-import { detectPlatform, extractLinkTitle } from "../lib/platform";
-import { createConciseAiSlot, createLearningAiSlot } from "../lib/aiTransform";
+import { createConciseAiSlot, createLearningAiSlot, getActiveMode } from "../lib/aiTransform";
 import { exportFolderToPdf } from "../lib/exportPdf";
 import {
   countUncategorizedRecords,
@@ -32,6 +29,8 @@ import {
   UNCATEGORIZED_RECORDS_VIEW_ID
 } from "../lib/folders";
 import { getAnalyzeErrorMessage } from "../lib/i18n";
+import { getSidebarFilterPresentation } from "../lib/status";
+import { canResumeTranscription } from "../lib/transcriptionResume";
 import type {
   AnalyzeMode,
   ConciseOutput,
@@ -40,7 +39,8 @@ import type {
   RecordItem,
   Tag
 } from "../types/domain";
-import type { CreateRecordValues } from "../types/forms";
+import type { ResumeTranscriptionOutcome } from "../lib/transcriptionResume";
+import type { AnalyzeFeedback } from "../types/api";
 
 type CollectionModalState =
   | { entity: "folder"; mode: "create"; target: null }
@@ -55,12 +55,17 @@ type ConfirmState =
   | { entity: "record"; target: RecordItem }
   | null;
 
+function buildAnalyzeFeedbackKey(recordId: string, mode: AnalyzeMode) {
+  return `${recordId}:${mode}`;
+}
+
 function buildEmptyState(
   languageText: ReturnType<typeof useAppI18n>["t"],
+  language: ReturnType<typeof useAppI18n>["appLanguage"],
   searchQuery: string,
   selectedFolderId: string | null,
   selectedTagId: string | null,
-  activeFilter: "all" | "recent" | "unorganized" | "needs_review"
+  activeFilter: "all" | "recent" | "unorganized" | "not_started" | "needs_review" | "review_later"
 ) {
   if (searchQuery.trim()) {
     return {
@@ -91,17 +96,23 @@ function buildEmptyState(
   }
 
   if (activeFilter === "unorganized") {
-    return {
-      title: languageText.empty.unorganizedTitle,
-      description: languageText.empty.unorganizedDescription
-    };
+    const presentation = getSidebarFilterPresentation("unorganized", language);
+    return { title: presentation.emptyTitle, description: presentation.emptyDescription };
+  }
+
+  if (activeFilter === "not_started") {
+    const presentation = getSidebarFilterPresentation("not_started", language);
+    return { title: presentation.emptyTitle, description: presentation.emptyDescription };
   }
 
   if (activeFilter === "needs_review") {
-    return {
-      title: languageText.empty.needsReviewTitle,
-      description: languageText.empty.needsReviewDescription
-    };
+    const presentation = getSidebarFilterPresentation("needs_review", language);
+    return { title: presentation.emptyTitle, description: presentation.emptyDescription };
+  }
+
+  if (activeFilter === "review_later") {
+    const presentation = getSidebarFilterPresentation("review_later", language);
+    return { title: presentation.emptyTitle, description: presentation.emptyDescription };
   }
 
   return {
@@ -120,9 +131,14 @@ export function HomePage() {
   const [collectionModal, setCollectionModal] = useState<CollectionModalState>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
   const [detailDismissed, setDetailDismissed] = useState(false);
+  const [analyzeFeedbackByKey, setAnalyzeFeedbackByKey] = useState<Record<string, AnalyzeFeedback>>({});
 
   const filteredRecords = useRecordFilters(records, tags, folders);
   const selectedRecord = filteredRecords.find((record) => record.id === selectedRecordId) || null;
+  const selectedAnalyzeFeedback =
+    selectedRecord
+      ? analyzeFeedbackByKey[buildAnalyzeFeedbackKey(selectedRecord.id, getActiveMode(selectedRecord))] || null
+      : null;
 
   useEffect(() => {
     const hasSelectedRecord = filteredRecords.some((record) => record.id === selectedRecordId);
@@ -145,63 +161,15 @@ export function HomePage() {
     }
   }, [selectedRecord?.id]);
 
-  const emptyState = buildEmptyState(t, searchQuery, selectedFolderId, selectedTagId, activeFilter);
+  const emptyState = buildEmptyState(t, appLanguage, searchQuery, selectedFolderId, selectedTagId, activeFilter);
 
   const normalizedFolders = folders;
   const normalizedTags = tags;
   const uncategorizedCount = countUncategorizedRecords(records, normalizedFolders);
 
-  const handleCreateRecord = async (
-    values: CreateRecordValues,
-    importResult: ImportResult | null,
-    transcriptionResult: ClientTranscriptionResult | null
-  ) => {
-    const createdAt = new Date().toISOString();
-    const importSnapshot = buildRecordImportSnapshot(importResult);
-    const originalUrl =
-      values.inputMethod === "link"
-        ? importSnapshot.originalUrl || values.originalUrl?.trim() || null
-        : null;
-    const originalContent =
-      values.content?.trim() || transcriptionResult?.transcriptText || importSnapshot.detectedContent || "";
-    const sourcePlatform =
-      values.inputMethod === "link" ? detectPlatform(originalUrl) : importSnapshot.platform;
-    const sourceType =
-      transcriptionResult?.sourceType ||
-      (values.inputMethod === "link"
-        ? "link"
-        : values.inputMethod === "manual"
-          ? "manual"
-          : "text");
-    const contentCompleteness =
-      transcriptionResult != null
-        ? originalContent.trim()
-          ? "full"
-          : "none"
-        : importSnapshot.importSummary?.contentCompleteness === "full"
-          ? "full"
-          : importSnapshot.importSummary?.contentCompleteness === "partial"
-            ? "partial"
-            : originalContent.trim()
-              ? "minimal"
-              : "none";
-
-    const title = buildRecordTitle({
-      userTitle: values.title,
-      linkTitle: values.inputMethod === "upload"
-        ? transcriptionResult?.suggestedTitle || importSnapshot.detectedTitle || undefined
-        : importSnapshot.detectedTitle || extractLinkTitle(originalUrl) || undefined,
-      content: originalContent,
-      createdAt
-    });
-
-    const tagNames = values.tagsText
-      ?.split(",")
-      .map((item) => item.trim())
-      .filter(Boolean) || [];
-
+  const handleCreateRecord = async (draft: CreateRecordDraft) => {
     const tagIds: string[] = [];
-    for (const tagName of tagNames) {
+    for (const tagName of draft.tagNames) {
       const existing = normalizedTags.find((tag) => tag.name === tagName);
       if (existing) {
         tagIds.push(existing.id);
@@ -222,25 +190,27 @@ export function HomePage() {
 
     const record: RecordItem = {
       id: crypto.randomUUID(),
-      title,
-      sourcePlatform,
-      sourceType,
-      inputMethod: values.inputMethod,
-      originalUrl,
-      folderId: values.folderId || null,
+      title: draft.title,
+      sourcePlatform: draft.sourcePlatform,
+      sourceType: draft.sourceType,
+      inputMethod: draft.inputMethod,
+      originalUrl: draft.originalUrl,
+      folderId: draft.folderId,
       tagIds,
-      createdAt,
-      updatedAt: createdAt,
+      createdAt: draft.createdAt,
+      updatedAt: draft.createdAt,
       watchedAt: null,
       lastViewedAt: null,
-      originalContent,
+      originalContent: draft.originalContent,
       personalNote: "",
-      transcriptionStatus: transcriptionResult?.transcriptionStatus || "idle",
-      contentCompleteness,
-      transcriptMeta: transcriptionResult?.transcriptMeta || null,
+      reviewLater: false,
+      transcriptionStatus: draft.transcriptionStatus,
+      contentCompleteness: draft.contentCompleteness,
+      transcriptMeta: draft.transcriptMeta,
+      mediaAsset: draft.mediaAsset,
       aiStatus: "not_started",
       aiErrorMessage: null,
-      importSummary: importSnapshot.importSummary,
+      importSummary: draft.importSummary,
       currentMode: null,
       aiOutputs: {
         concise: null,
@@ -255,10 +225,18 @@ export function HomePage() {
   };
 
   const handleAnalyze = async (record: RecordItem, mode: AnalyzeMode) => {
+    const feedbackKey = buildAnalyzeFeedbackKey(record.id, mode);
+
     if (!record.originalContent.trim()) {
       window.alert(t.common.originalContentRequired);
       return;
     }
+
+    setAnalyzeFeedbackByKey((current) => {
+      const next = { ...current };
+      delete next[feedbackKey];
+      return next;
+    });
 
     await recordRepository.update(record.id, {
       aiStatus: "processing",
@@ -269,7 +247,12 @@ export function HomePage() {
 
     const response = await analyzeRecord(record, mode, appLanguage);
 
-    if (!response.success) {
+    if (response.outcome === "failed") {
+      setAnalyzeFeedbackByKey((current) => {
+        const next = { ...current };
+        delete next[feedbackKey];
+        return next;
+      });
       await recordRepository.update(record.id, {
         aiStatus: "failed",
         aiErrorCode: response.error.code,
@@ -278,6 +261,33 @@ export function HomePage() {
       });
       return;
     }
+
+    if (response.outcome === "needs_review") {
+      setAnalyzeFeedbackByKey((current) => ({
+        ...current,
+        [feedbackKey]: {
+          recordId: record.id,
+          mode,
+          generatedAt: response.meta.generatedAt,
+          source: response.meta.source,
+          review: response.review
+        }
+      }));
+      await recordRepository.update(record.id, {
+        currentMode: mode,
+        aiStatus: "needs_review",
+        aiErrorMessage: null,
+        aiErrorCode: null,
+        updatedAt: new Date().toISOString()
+      });
+      return;
+    }
+
+    setAnalyzeFeedbackByKey((current) => {
+      const next = { ...current };
+      delete next[feedbackKey];
+      return next;
+    });
 
     const previous = record.aiOutputs[mode];
     const slot =
@@ -304,6 +314,51 @@ export function HomePage() {
       },
       updatedAt: new Date().toISOString()
     });
+    };
+
+  const handleResumeTranscription = async (record: RecordItem): Promise<ResumeTranscriptionOutcome> => {
+    if (!canResumeTranscription(record) || !record.originalUrl) {
+      return { status: "failed", reason: "no_import_result" };
+    }
+
+    try {
+      const session = await resolveImport({
+        inputMethod: "link",
+        originalUrl: record.originalUrl,
+        appLanguage
+      });
+
+      if (!session.result) {
+        return { status: "failed", reason: "no_import_result" };
+      }
+
+      const snapshot = buildRecordImportSnapshot(session.result);
+      const patch: Partial<RecordItem> = {
+        originalUrl: snapshot.originalUrl ?? record.originalUrl,
+        sourcePlatform:
+          snapshot.platform !== "unknown" ? snapshot.platform : record.sourcePlatform,
+        importSummary: snapshot.importSummary,
+        updatedAt: new Date().toISOString()
+      };
+
+      const detectedContent = session.result.detectedContent?.trim();
+      if (detectedContent) {
+        patch.originalContent = detectedContent;
+        patch.contentCompleteness =
+          session.result.contentCompleteness === "empty"
+            ? "none"
+            : session.result.contentCompleteness;
+      }
+
+      await recordRepository.update(record.id, patch);
+      if (!detectedContent) {
+        return { status: "failed", reason: "no_detected_content" };
+      }
+
+      return { status: "patched" };
+    } catch {
+      return { status: "failed", reason: "request_failed" };
+    }
   };
 
   const handleDeleteRecord = async (record: RecordItem) => {
@@ -445,6 +500,12 @@ export function HomePage() {
     }
 
     await recordRepository.delete(confirmState.target.id);
+    setAnalyzeFeedbackByKey((current) => {
+      const next = { ...current };
+      delete next[buildAnalyzeFeedbackKey(confirmState.target.id, "concise")];
+      delete next[buildAnalyzeFeedbackKey(confirmState.target.id, "learning")];
+      return next;
+    });
     if (selectedRecordId === confirmState.target.id) {
       setDetailDismissed(false);
       setSelectedRecordId(null);
@@ -491,6 +552,7 @@ export function HomePage() {
             records={filteredRecords}
             folders={normalizedFolders}
             tags={normalizedTags}
+            activeFilter={activeFilter}
             selectedRecordId={selectedRecordId}
             emptyTitle={emptyState.title}
             emptyDescription={emptyState.description}
@@ -502,7 +564,9 @@ export function HomePage() {
             record={selectedRecord}
             folders={normalizedFolders}
             tags={normalizedTags}
+            analyzeFeedback={selectedAnalyzeFeedback}
             onAnalyze={handleAnalyze}
+            onResumeTranscription={handleResumeTranscription}
             onDeleteRecord={handleDeleteRecord}
           />
         }

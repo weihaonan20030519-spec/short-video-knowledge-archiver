@@ -58,6 +58,7 @@ describe("transcriptionController", () => {
       expect.objectContaining({
         success: true,
         data: expect.objectContaining({
+          phase: "transcript_ready",
           sourceType: "audio",
           transcriptionStatus: "transcript_needs_review"
         })

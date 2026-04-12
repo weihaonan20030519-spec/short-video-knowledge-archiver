@@ -1,11 +1,17 @@
 import { screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { recordRepository } from "../db/repositories/recordRepository";
 import { APP_LANGUAGE_STORAGE_KEY } from "../lib/i18n";
 import { useSettingsStore } from "../stores/settingsStore";
 import { renderApp } from "../test/utils";
 import { createFolder, createRecord, createTag } from "../test/factories";
+
+afterEach(() => {
+  useSettingsStore.getState().setAppLanguage("zh-CN");
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 async function openFolderCreateModal() {
   const { user } = await renderApp();
@@ -86,7 +92,167 @@ function createBilibiliImportData(overrides: Partial<{
 }
 
 describe("HomePage interactions", () => {
-  it("auto-imports bilibili subtitles into the create-record modal", async () => {
+  it("passes imported article content through record storage into both analyze modes", async () => {
+    const importedContent =
+      "这是网页正文，先解释方法为什么有效，再给出执行顺序。\n\n[图片文字补充]\n图里补充了三个动作：先写目标，再拆步骤，最后补风险。";
+    const analyzeBodies: Array<{
+      mode: "concise" | "learning";
+      rawText: string;
+      title?: string;
+      originalUrl: string | null;
+    }> = [];
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/import/article")) {
+        return {
+          json: async () => ({
+            success: true,
+            data: {
+              originalUrl: "https://www.xiaohongshu.com/explore/ocr-closed-loop",
+              resolvedUrl: "https://www.xiaohongshu.com/explore/ocr-closed-loop",
+              platform: "xiaohongshu",
+              title: "小红书图文闭环测试",
+              excerpt: "这是摘要，不应覆盖完整正文。",
+              contentText: importedContent,
+              fetchSucceeded: true,
+              extractionMethod: "readability",
+              extractionReport: {
+                extractionSources: ["html_text", "image_ocr"],
+                hasHtmlText: true,
+                hasImageOcrText: true,
+                htmlTextLength: 29,
+                imageSignalsFound: 6,
+                candidateImagesSelected: 3,
+                ocrAttemptLimit: 9,
+                candidateSelectionReasons: ["platform_priority", "content_images"],
+                imageOcrAttempted: 3,
+                imageOcrSucceeded: 3,
+                imageOcrFailed: 0,
+                imageOcrTextLength: 29,
+                ocrStatus: "successful",
+                coverageLevel: "partial"
+              },
+              warnings: []
+            },
+            error: null
+          })
+        };
+      }
+
+      if (url.endsWith("/api/analyze")) {
+        const body = JSON.parse(String(init?.body));
+        analyzeBodies.push(body);
+
+        if (body.mode === "concise") {
+          return {
+            json: async () => ({
+              success: true,
+              outcome: "resolved",
+              data: {
+                summary: "总结里已经吸收了图片 OCR 补充的执行顺序。",
+                bullets: ["先写目标", "再拆步骤", "最后补风险"]
+              },
+              review: null,
+              error: null,
+              meta: {
+                mode: "concise",
+                source: "model",
+                generatedAt: "2026-04-09T12:00:00.000Z",
+                decision: {
+                  routeAction: "call_model",
+                  reasonCode: "model_required"
+                }
+              }
+            })
+          };
+        }
+
+        return {
+          json: async () => ({
+            success: true,
+            outcome: "resolved",
+            data: {
+              coreConclusion: "学习版同样引用了 OCR 里补充的三步动作。",
+              logicFramework: ["先写目标", "再拆步骤", "最后补风险"],
+              keyDetails: ["正文解释了原因", "图片补充了顺序"],
+              reusablePoints: ["先确认目标，再展开动作"]
+            },
+            review: null,
+            error: null,
+            meta: {
+              mode: "learning",
+              source: "model",
+              generatedAt: "2026-04-09T12:05:00.000Z",
+              decision: {
+                routeAction: "call_model",
+                reasonCode: "model_required"
+              }
+            }
+          })
+        };
+      }
+
+      throw new Error(`Unexpected fetch url: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { user } = await renderApp();
+
+    await openLinkImportCreateModal(user);
+    await user.type(
+      screen.getByPlaceholderText("https://..."),
+      "https://www.xiaohongshu.com/explore/ocr-closed-loop"
+    );
+    await user.click(screen.getByRole("button", { name: "尝试提取链接内容" }));
+
+    const contentField = await screen.findByRole("textbox", { name: "原始内容 / 字幕 / 备注" });
+    expect(contentField).toHaveValue(importedContent);
+
+    await user.click(screen.getByRole("button", { name: "创建记录" }));
+
+    expect(await screen.findByText("小红书图文闭环测试")).toBeInTheDocument();
+
+    const createdRecords = await recordRepository.listAll();
+    expect(createdRecords[0]?.originalContent).toBe(importedContent);
+
+    await user.click(screen.getByTestId("detail-ai-primary-action"));
+
+    await waitFor(() => {
+      expect(analyzeBodies).toHaveLength(1);
+    });
+
+    expect(analyzeBodies[0]).toEqual(
+      expect.objectContaining({
+        mode: "concise",
+        rawText: importedContent,
+        title: "小红书图文闭环测试",
+        originalUrl: "https://www.xiaohongshu.com/explore/ocr-closed-loop"
+      })
+    );
+    expect(await screen.findByText("总结里已经吸收了图片 OCR 补充的执行顺序。")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "学习版" }));
+    await user.click(screen.getByTestId("detail-ai-primary-action"));
+
+    await waitFor(() => {
+      expect(analyzeBodies).toHaveLength(2);
+    });
+
+    expect(analyzeBodies[1]).toEqual(
+      expect.objectContaining({
+        mode: "learning",
+        rawText: importedContent,
+        title: "小红书图文闭环测试",
+        originalUrl: "https://www.xiaohongshu.com/explore/ocr-closed-loop"
+      })
+    );
+    expect(await screen.findByText("学习版同样引用了 OCR 里补充的三步动作。")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "逻辑框架" })).toBeInTheDocument();
+  });
+
+  it("imports bilibili subtitles into the create-record modal after the explicit link CTA", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       json: async () => ({
         success: true,
@@ -101,14 +267,15 @@ describe("HomePage interactions", () => {
 
     await openLinkImportCreateModal(user);
     await user.type(screen.getByPlaceholderText("https://..."), "https://www.bilibili.com/video/BV1xx411c7mD/");
+    await user.click(screen.getByRole("button", { name: "尝试提取链接内容" }));
 
-    expect(await screen.findAllByText("已检测到多条字幕轨，可继续使用当前结果，也可切换其他轨道。")).toHaveLength(2);
+    expect(await screen.findByText("已检测到多条字幕轨，可继续使用当前结果，也可切换其他轨道。")).toBeInTheDocument();
     expect(screen.getByDisplayValue("B站方法论视频")).toBeInTheDocument();
     const contentField = screen.getByRole("textbox", { name: "原始内容 / 字幕 / 备注" }) as HTMLTextAreaElement;
     expect(contentField.value).toContain("先明确目标");
     expect(contentField.value).toContain("更适合直接进入 AI 整理");
-    expect(screen.getByText("已检测到 2 条字幕轨")).toBeInTheDocument();
-    expect(screen.getByText("检测到多条字幕轨，可选择导入其中一条。")).toBeInTheDocument();
+    expect(screen.getByLabelText("字幕轨道")).toBeInTheDocument();
+    expect(screen.queryByText("检测到多条字幕轨，可选择导入其中一条。")).not.toBeInTheDocument();
   });
 
   it("allows choosing another bilibili subtitle track when multiple tracks are detected", async () => {
@@ -139,6 +306,7 @@ describe("HomePage interactions", () => {
 
     await openLinkImportCreateModal(user);
     await user.type(screen.getByPlaceholderText("https://..."), "https://www.bilibili.com/video/BV1xx411c7mD/");
+    await user.click(screen.getByRole("button", { name: "尝试提取链接内容" }));
 
     const trackSelect = await screen.findByLabelText("字幕轨道", {}, { timeout: 2500 });
     await user.selectOptions(trackSelect, "track-ai");
@@ -163,6 +331,7 @@ describe("HomePage interactions", () => {
     expect(await screen.findByText("B站方法论视频")).toBeInTheDocument();
     const createdRecords = await recordRepository.listAll();
     expect(createdRecords[0]?.importSummary).toEqual({
+      source: "link_bilibili_server",
       outcome: "partial",
       contentCompleteness: "partial"
     });
@@ -195,12 +364,10 @@ describe("HomePage interactions", () => {
 
     await openLinkImportCreateModal(user);
     await user.type(screen.getByPlaceholderText("https://..."), "https://www.bilibili.com/video/BV1xx411c7mD/");
+    await user.click(screen.getByRole("button", { name: "尝试提取链接内容" }));
 
-    expect(await screen.findAllByText("当前检测到多条字幕轨，建议先选择一条再创建记录。")).toHaveLength(2);
-    expect(screen.getByText("已检测到 2 条字幕轨")).toBeInTheDocument();
-    expect(
-      screen.getByText("已识别到字幕线索，但当前未能完整提取正文，可继续创建记录并手动补充。")
-    ).toBeInTheDocument();
+    expect(await screen.findByText("当前检测到多条字幕轨，建议先选择一条再创建记录。")).toBeInTheDocument();
+    expect(screen.getByLabelText("字幕轨道")).toBeInTheDocument();
     expect(
       screen.getByText("当前未能完整提取内容，可能受平台访问限制影响；你仍可继续创建记录并手动补充。")
     ).toBeInTheDocument();
@@ -210,6 +377,7 @@ describe("HomePage interactions", () => {
     expect(await screen.findByText("B站无可用字幕视频")).toBeInTheDocument();
     const createdRecords = await recordRepository.listAll();
     expect(createdRecords[0]?.importSummary).toEqual({
+      source: "link_bilibili_server",
       outcome: "failed_but_creatable",
       contentCompleteness: "empty"
     });
@@ -244,10 +412,10 @@ describe("HomePage interactions", () => {
 
     await openLinkImportCreateModal(user);
     await user.type(screen.getByPlaceholderText("https://..."), "https://www.bilibili.com/video/BV1xx411c7mD/");
+    await user.click(screen.getByRole("button", { name: "尝试提取链接内容" }));
 
-    expect(
-      await screen.findByText("已识别链接或来源，但正文仍不足。可继续创建，并补充正文 / 字幕 / 笔记。")
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "创建记录" })).toBeEnabled();
+    expect(screen.getByRole("textbox", { name: "原始内容 / 字幕 / 备注" })).toBeInTheDocument();
     expect(
       screen.queryByText("自动导入流程未完成，但不会阻止你先创建记录。")
     ).not.toBeInTheDocument();
@@ -353,6 +521,7 @@ describe("HomePage interactions", () => {
 
     const createdRecords = await recordRepository.listAll();
     expect(createdRecords[0]?.importSummary).toEqual({
+      source: "browser_context",
       outcome: "complete",
       contentCompleteness: "full"
     });
@@ -520,6 +689,7 @@ describe("HomePage interactions", () => {
 
     const createdRecords = await recordRepository.listAll();
     expect(createdRecords[0]?.importSummary).toEqual({
+      source: "browser_context",
       outcome: "failed_but_creatable",
       contentCompleteness: "empty"
     });
@@ -544,8 +714,7 @@ describe("HomePage interactions", () => {
     expect(await screen.findByRole("button", { name: "Upload File" })).toBeInTheDocument();
     expect(screen.getByText("Upload Video or Audio")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Paste text" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Manual entry" })).toBeInTheDocument();
-    expect(screen.getByText("Other import methods")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start Blank" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Paste link" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Browser import (Beta)" })).toBeInTheDocument();
   });
@@ -556,12 +725,20 @@ describe("HomePage interactions", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       json: async () => ({
         success: true,
+        outcome: "resolved",
         data: {
           summary: "English summary",
           bullets: ["Point one", "Point two", "Point three"]
         },
         error: null,
+        review: null,
         meta: {
+          mode: "concise",
+          source: "model",
+          decision: {
+            routeAction: "call_model",
+            reasonCode: "model_required"
+          },
           generatedAt: "2026-04-05T12:00:00.000Z"
         }
       })
@@ -609,6 +786,58 @@ describe("HomePage interactions", () => {
       const saved = await recordRepository.getById(uploadedRecord.id);
       expect(saved?.transcriptionStatus).toBe("transcript_ready");
     });
+  });
+
+  it("does not write aiOutputs when analyze returns needs_review", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: async () => ({
+        success: true,
+        outcome: "needs_review",
+        data: null,
+        error: null,
+        review: {
+          reasonCode: "source_text_needs_review",
+          recommendedAction: "edit_source_text"
+        },
+        meta: {
+          mode: "concise",
+          source: "local",
+          decision: {
+            routeAction: "return_review",
+            reasonCode: "source_text_needs_review"
+          },
+          generatedAt: "2026-04-05T12:00:00.000Z"
+        }
+      })
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const record = createRecord({
+      id: "record-needs-review",
+      title: "Needs review",
+      originalContent: "This content is valid, but still too short for reliable learning output.",
+      sourceType: "text"
+    });
+
+    const { user } = await renderApp({ records: [record] });
+
+    expect(await screen.findByText("Needs review")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "开始整理" }));
+
+    await waitFor(async () => {
+      const saved = await recordRepository.getById(record.id);
+      expect(saved?.aiStatus).toBe("needs_review");
+      expect(saved?.aiOutputs.concise).toBeNull();
+      expect(saved?.aiOutputs.learning).toBeNull();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("detail-ai-review-notice")).toBeInTheDocument();
+    });
+    expect(screen.getByText("这次先不生成整理结果")).toBeInTheDocument();
+    expect(screen.getByText("建议先补充原文，再重新整理。")).toBeInTheDocument();
   });
 
   it("opens and closes the folder create modal", async () => {
@@ -733,6 +962,254 @@ describe("HomePage interactions", () => {
     expect(screen.getByText("尚未归档到任何文件夹的内容会显示在这里")).toBeInTheDocument();
   });
 
+  it("filters review-later records through a dedicated sidebar entry without affecting needs review", async () => {
+    const reviewLaterRecord = createRecord({
+      id: "record-review-later",
+      title: "之后再补的记录",
+      reviewLater: true,
+      originalContent: " ",
+      contentCompleteness: "none",
+      transcriptionStatus: "idle"
+    });
+    const needsReviewRecord = createRecord({
+      id: "record-needs-review",
+      title: "当前整理待复核",
+      reviewLater: false,
+      originalContent: "这里已经有原文，但还没整理。",
+      transcriptionStatus: "idle"
+    });
+
+    const { user } = await renderApp({
+      records: [reviewLaterRecord, needsReviewRecord]
+    });
+
+    await user.click(screen.getByRole("button", { name: "需复查" }));
+
+    expect(await screen.findByText("之后再补的记录")).toBeInTheDocument();
+    expect(screen.queryByText("当前整理待复核")).not.toBeInTheDocument();
+    expect(screen.getByTestId("record-list-card-primary-signal")).toHaveTextContent("未开始");
+    const reviewLaterSummary = screen.getByTestId("record-list-summary-chips");
+    expect(reviewLaterSummary).toHaveTextContent("需复查");
+    expect(screen.getByTestId("record-list-review-later-chip")).toHaveClass("bg-slate-50", "text-slate-500");
+
+    await user.click(screen.getByRole("button", { name: "展开子状态" }));
+    expect(screen.getByRole("button", { name: "整理待复核" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "整理待复核" }));
+
+    expect(await screen.findByText("当前整理待复核")).toBeInTheDocument();
+    expect(screen.queryByText("之后再补的记录")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("record-list-primary-pill")).not.toBeInTheDocument();
+    expect(screen.getByTestId("record-list-card-contextual-status")).toHaveTextContent("整理待复核");
+  });
+
+  it("uses the pending sidebar bucket as a broad filter while the list keeps specific status explanations", async () => {
+    const notStartedRecord = createRecord({
+      id: "record-not-started",
+      title: "完全未开始的记录",
+      originalContent: " ",
+      transcriptionStatus: "idle",
+      aiStatus: "not_started",
+      aiOutputs: { concise: null, learning: null }
+    });
+    const needsReviewRecord = createRecord({
+      id: "record-needs-review-sidebar",
+      title: "整理待复核记录",
+      originalContent: "这里已经有正文，但还没整理。",
+      transcriptionStatus: "idle",
+      aiStatus: "not_started",
+      aiOutputs: { concise: null, learning: null }
+    });
+    const failedRecord = createRecord({
+      id: "record-failed-sidebar",
+      title: "转写失败记录",
+      originalContent: " ",
+      transcriptionStatus: "transcript_failed",
+      aiStatus: "not_started",
+      aiOutputs: { concise: null, learning: null }
+    });
+    const organizedRecord = createRecord({
+      id: "record-organized-sidebar",
+      title: "已整理记录",
+      aiStatus: "done",
+      aiOutputs: {
+        concise: {
+          mode: "concise",
+          generatedAt: "2026-04-01T00:00:00.000Z",
+          lastEditedAt: null,
+          version: 1,
+          originalResult: { summary: "完成摘要", bullets: [] },
+          currentResult: { summary: "完成摘要", bullets: [] }
+        },
+        learning: null
+      }
+    });
+
+    const { user } = await renderApp({
+      records: [notStartedRecord, needsReviewRecord, failedRecord, organizedRecord]
+    });
+
+    await user.click(screen.getByRole("button", { name: "待处理" }));
+
+    expect(await screen.findByText("完全未开始的记录")).toBeInTheDocument();
+    expect(screen.getByText("整理待复核记录")).toBeInTheDocument();
+    expect(screen.getByText("转写失败记录")).toBeInTheDocument();
+    expect(screen.queryByText("已整理记录")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "未开始" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "整理待复核" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "展开子状态" }));
+    expect(screen.getByRole("button", { name: "收起子状态" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "未开始" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "整理待复核" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "未开始" }));
+
+    expect(await screen.findByText("完全未开始的记录")).toBeInTheDocument();
+    expect(screen.queryByText("整理待复核记录")).not.toBeInTheDocument();
+    expect(screen.queryByText("转写失败记录")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "未开始" })).toHaveClass("bg-slate-100", "text-slate-950");
+
+    await user.click(screen.getByRole("button", { name: "整理待复核" }));
+
+    expect(screen.queryByText("完全未开始的记录")).not.toBeInTheDocument();
+    expect(await screen.findByText("整理待复核记录")).toBeInTheDocument();
+    expect(screen.queryByText("转写失败记录")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("record-list-primary-pill")).not.toBeInTheDocument();
+    expect(screen.getByTestId("record-list-card-contextual-status")).toHaveTextContent("整理待复核");
+  });
+
+  it("lets the child filter be opened independently from the parent filter", async () => {
+    const needsReviewRecord = createRecord({
+      id: "record-needs-review-sidebar-child",
+      title: "整理待复核记录",
+      originalContent: "这里已经有正文，但还没整理。",
+      transcriptionStatus: "idle",
+      aiStatus: "not_started",
+      aiOutputs: { concise: null, learning: null }
+    });
+
+    const { user } = await renderApp({
+      records: [needsReviewRecord]
+    });
+
+    expect(screen.queryByRole("button", { name: "整理待复核" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "未开始" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "展开子状态" }));
+    expect(await screen.findByRole("button", { name: "未开始" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "整理待复核" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "整理待复核" }));
+
+    expect(await screen.findByText("整理待复核记录")).toBeInTheDocument();
+  });
+
+  it("keeps the child filter hidden until the bucket is expanded", async () => {
+    const reviewLaterRecord = createRecord({
+      id: "record-review-later",
+      title: "之后再补的记录",
+      reviewLater: true,
+      originalContent: " ",
+      contentCompleteness: "none",
+      transcriptionStatus: "idle"
+    });
+
+    const { user } = await renderApp({
+      records: [reviewLaterRecord]
+    });
+
+    await user.click(screen.getByRole("button", { name: "待处理" }));
+
+    expect(screen.queryByRole("button", { name: "整理待复核" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "未开始" })).not.toBeInTheDocument();
+  });
+
+  it("resumes an idle link record without creating a duplicate record", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      json: async () => ({
+        success: true,
+        data: {
+          originalUrl: "https://example.com/article/resume-me",
+          resolvedUrl: "https://example.com/article/resume-me",
+          platform: "other",
+          title: "恢复导入的文章",
+          excerpt: "恢复时拿到的摘要。",
+          contentText:
+            "这是恢复导入后拿到的一段正文内容，会直接回填到当前记录，而不是创建一条新的重复记录。这里继续补充更多上下文、步骤说明和注意事项，让内容稳定超过最小正文阈值。",
+          fetchSucceeded: true,
+          extractionMethod: "readability",
+          extractionReport: {
+            extractionSources: ["html_text"],
+            hasHtmlText: true,
+            hasImageOcrText: false,
+            htmlTextLength: 136,
+            imageSignalsFound: 0,
+            candidateImagesSelected: 0,
+            ocrAttemptLimit: 3,
+            candidateSelectionReasons: [],
+            imageOcrAttempted: 0,
+            imageOcrSucceeded: 0,
+            imageOcrTextLength: 0,
+            ocrStatus: "not_applicable",
+            coverageLevel: "full"
+          },
+          warnings: []
+        },
+        error: null
+      })
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resumableRecord = createRecord({
+      id: "record-resume-existing",
+      title: "误点创建后的链接记录",
+      inputMethod: "link",
+      sourceType: "link",
+      sourcePlatform: "other",
+      originalUrl: "https://example.com/article/resume-me",
+      originalContent: " ",
+      transcriptionStatus: "idle",
+      contentCompleteness: "none"
+    });
+
+    const { user } = await renderApp({
+      records: [resumableRecord]
+    });
+
+    expect(await screen.findByRole("button", { name: "继续转写" })).toBeInTheDocument();
+    expect(screen.getByText("将复用已保存链接，无需重新输入。")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "继续转写" }));
+
+    await waitFor(async () => {
+      const records = await recordRepository.listAll();
+      expect(records).toHaveLength(1);
+      expect(records[0]?.id).toBe("record-resume-existing");
+      expect(records[0]?.originalContent).toContain("恢复导入后拿到的一段正文内容");
+      expect(records[0]?.importSummary).toEqual({
+        source: "link_generic",
+        outcome: "complete",
+        contentCompleteness: "full",
+        sourceSignals: {
+          hasHtmlText: true
+        }
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("detail-transcription-status")).toHaveTextContent("转写状态: 待整理");
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3001/api/import/article",
+      expect.objectContaining({
+        body: JSON.stringify({
+          url: "https://example.com/article/resume-me"
+        })
+      })
+    );
+  });
+
   it("moves deleted folder records into uncategorized records", async () => {
     const deletableFolder = createFolder({ id: "folder-to-delete", name: "待删除文件夹", sortOrder: 1 });
     const movedRecord = createRecord({
@@ -746,9 +1223,10 @@ describe("HomePage interactions", () => {
       records: [movedRecord]
     });
 
-    const folderCard = (await screen.findByText("待删除文件夹")).closest("div");
-    expect(folderCard).not.toBeNull();
-    await user.click(within(folderCard as HTMLElement).getByRole("button", { name: "删除" }));
+    const folderCard = await screen.findByRole("button", { name: "待删除文件夹" });
+    const folderCardContainer = folderCard.closest("div");
+    expect(folderCardContainer).not.toBeNull();
+    await user.click(within(folderCardContainer as HTMLElement).getByRole("button", { name: "删除" }));
     await user.click(await screen.findByRole("button", { name: "确认删除" }));
 
     await waitFor(() => {

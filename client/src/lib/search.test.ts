@@ -29,6 +29,7 @@ describe("buildRecordSearchText", () => {
       lastViewedAt: null,
       originalContent: "这是一段原始内容",
       personalNote: "我自己的复盘",
+      reviewLater: false,
       transcriptionStatus: "idle",
       contentCompleteness: "full",
       transcriptMeta: null,
