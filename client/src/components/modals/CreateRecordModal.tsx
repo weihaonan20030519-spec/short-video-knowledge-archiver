@@ -142,8 +142,7 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
   });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const isBrowserImportMode = uiMode === "browser_import";
-  const browserImportRenderState =
-    isBrowserImportMode ? browserImportState : buildIdleBrowserImportState();
+  const browserImportRenderState = isBrowserImportMode ? browserImportState : buildIdleBrowserImportState();
 
   const jumpToContentField = () => {
     const contentField = document.getElementById(CREATE_RECORD_CONTENT_FIELD_ID) as HTMLTextAreaElement | null;
