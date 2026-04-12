@@ -60,6 +60,37 @@ describe("transcribeUploadedFile", () => {
     );
   });
 
+  it("keeps m4a audio inputs on an audio/mp4-compatible mime when the browser mime is generic", async () => {
+    const transcriptionProvider = createTranscriptionProviderMock();
+
+    await transcribeUploadedFile(
+      {
+        path: "/tmp/mock-input.m4a",
+        originalname: "clip.m4a",
+        mimetype: "application/octet-stream",
+        size: 1024
+      },
+      {},
+      {
+        transcriptionProvider,
+        audioExtractionService: createAudioExtractionServiceMock(),
+        probeMediaMetadata: vi.fn(async () => ({
+          sourceType: "audio" as const,
+          duration: 9.5,
+          format: "m4a"
+        }))
+      }
+    );
+
+    expect(transcriptionProvider.transcribe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceType: "audio",
+        fileName: "clip.m4a",
+        mimeType: "audio/mp4"
+      })
+    );
+  });
+
   it("extracts audio before transcribing a video upload", async () => {
     const transcriptionProvider = createTranscriptionProviderMock();
     const audioExtractionService = createAudioExtractionServiceMock();

@@ -265,7 +265,7 @@ describe("articleImportService", () => {
     expect(result.extractionReport.ocrStatus).toBe("provider_unavailable");
   });
 
-  it("returns OCR_NOT_ATTEMPTED when the page includes a likely body image but html already appears sufficient", async () => {
+  it("attempts OCR when the page includes a likely body image but html already appears sufficient", async () => {
     const fetcher = vi.fn(async () =>
       new Response(
         `
@@ -293,16 +293,27 @@ describe("articleImportService", () => {
       },
       {
         fetcher,
-        timeoutMs: 200
+        timeoutMs: 200,
+        ocrProvider: {
+          providerAvailable: true,
+          extractText: vi.fn(async () => ({
+            attempted: 1,
+            providerAvailable: true,
+            succeededCount: 0,
+            recognizedText: null,
+            recognizedTextLength: 0,
+            warnings: []
+          }))
+        }
       }
     );
 
     expect(result.extractionReport.imageSignalsFound).toBe(1);
     expect(result.extractionReport.candidateImagesSelected).toBe(1);
-    expect(result.extractionReport.ocrStatus).toBe("not_attempted");
-    expect(result.extractionReport.imageOcrFailed).toBe(0);
+    expect(result.extractionReport.ocrStatus).toBe("attempted_no_text");
+    expect(result.extractionReport.imageOcrFailed).toBe(1);
     expect(result.extractionReport.coverageLevel).toBe("partial");
-    expect(result.warnings.map((warning) => warning.code)).toContain("OCR_NOT_ATTEMPTED");
+    expect(result.warnings.map((warning) => warning.code)).toContain("OCR_NO_TEXT_DETECTED");
   });
 
   it("keeps full html partial when selected body images are OCRed successfully", async () => {

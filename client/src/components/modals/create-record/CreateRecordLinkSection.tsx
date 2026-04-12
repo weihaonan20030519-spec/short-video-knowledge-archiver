@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { MessageDictionary } from "../../../lib/i18n";
 import { getImportUiMessages } from "../../../lib/i18n";
 import type { AppLanguage } from "../../../types/domain";
@@ -6,6 +7,7 @@ import {
   getVisibleImportWarnings,
   type PasteLinkImportUiState
 } from "../../../features/create-record/createRecordImportUi";
+import { createRecordDebugLog, isCreateRecordDebugEnabled } from "./createRecordDebug";
 
 interface CreateRecordLinkSectionProps {
   t: MessageDictionary;
@@ -31,6 +33,7 @@ export function CreateRecordLinkSection({
   hasAttemptedImport,
   importResult,
   isTriggerDisabled,
+  linkImportUiState,
   primaryMessage,
   helperMessage,
   statusTone,
@@ -45,6 +48,46 @@ export function CreateRecordLinkSection({
   const showEmptyPanel = !showStatusPanel;
   const visibleWarnings = getVisibleImportWarnings(importResult, appLanguage);
   const showImportResultPanel = Boolean(importResult && (showTrackSelector || visibleWarnings.length > 0));
+  const isCreateRecordDebug = isCreateRecordDebugEnabled();
+
+  useEffect(() => {
+    if (!isCreateRecordDebug) {
+      return;
+    }
+
+    createRecordDebugLog("link.section.render", {
+      section: "paste_link",
+      canTriggerImport,
+      hasAttemptedImport,
+      linkImportUiState,
+      statusTone,
+      showEmptyPanel,
+      showStatusPanel,
+      showImportResultPanel,
+      primaryMessage,
+      helperMessage,
+      importResultOutcome: importResult?.outcome || null,
+      importResultSource: importResult?.source || null,
+      visibleWarnings: visibleWarnings.map((warning) => warning.code),
+      trackCount: trackOptions.length,
+      selectedTrackId
+    });
+  }, [
+    canTriggerImport,
+    hasAttemptedImport,
+    helperMessage,
+    importResult,
+    isCreateRecordDebug,
+    linkImportUiState,
+    primaryMessage,
+    selectedTrackId,
+    showEmptyPanel,
+    showImportResultPanel,
+    showStatusPanel,
+    statusTone,
+    trackOptions.length,
+    visibleWarnings
+  ]);
 
   return (
     <div className="space-y-2 rounded-[24px] border border-slate-200 bg-slate-50/90 px-4 py-3">

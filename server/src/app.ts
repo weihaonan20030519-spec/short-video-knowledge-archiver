@@ -44,24 +44,24 @@ export function isAllowedCorsOrigin(origin: string | undefined, allowedAppOrigin
 export function createApp(dependencies: AppDependencies = {}) {
   const app = express();
   const allowedAppOrigins = resolveAllowedAppOrigins();
+  const corsOptions: cors.CorsOptions = {
+    origin(origin, callback) {
+      if (isAllowedCorsOrigin(origin, allowedAppOrigins)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`Origin ${origin} is not allowed by CORS`));
+    }
+  };
   const analysisProvider = dependencies.analysisProvider || createAnalysisProvider();
   const transcriptionProvider = dependencies.transcriptionProvider || createTranscriptionProvider();
   const articleOcrProvider = dependencies.articleOcrProvider || createArticleOcrProvider();
   const audioExtractionService =
     dependencies.audioExtractionService || new FfmpegAudioExtractionService();
 
-  app.use(
-    cors({
-      origin(origin, callback) {
-        if (isAllowedCorsOrigin(origin, allowedAppOrigins)) {
-          callback(null, true);
-          return;
-        }
-
-        callback(new Error(`Origin ${origin} is not allowed by CORS`));
-      }
-    })
-  );
+  app.use(cors(corsOptions));
+  app.options("/api/transcribe/file", cors(corsOptions));
   app.use(express.json({ limit: "1mb" }));
 
   app.use("/api", healthRoutes);

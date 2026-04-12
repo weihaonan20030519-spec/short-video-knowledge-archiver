@@ -326,11 +326,11 @@ function shouldAttemptImageOcr(input: {
   const htmlCompleteness = classifyTextCompletenessByLength(input.htmlTextLength);
 
   if (input.platform === "xiaohongshu") {
-    return input.htmlTextLength < XIAOHONGSHU_OCR_HTML_THRESHOLD;
+    return true;
   }
 
   if (htmlCompleteness === "full" && input.candidates.length <= 1) {
-    return false;
+    return true;
   }
 
   return input.htmlTextLength < IMAGE_RELIANT_HTML_THRESHOLD || input.candidates.length >= 2;

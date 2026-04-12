@@ -30,7 +30,9 @@ async function waitForUploadedFile(client: GoogleGenAI, fileName: string) {
     try {
       uploaded = await client.files.get({ name: fileName });
     } catch (error) {
-      throw mapGeminiTranscriptionError(error, "Gemini file status lookup failed", 502);
+      throw logAndMapGeminiTranscriptionError("file status lookup", error, "Gemini file status lookup failed", 502, {
+        fileName
+      });
     }
     if (uploaded.state === FileState.ACTIVE || uploaded.state == null) {
       return uploaded;
@@ -205,6 +207,24 @@ function buildModelAttemptMeta(modelAttempts: string[]) {
   };
 }
 
+function logAndMapGeminiTranscriptionError(
+  stage: string,
+  error: unknown,
+  fallbackMessage: string,
+  fallbackStatus = 502,
+  context: Record<string, unknown> = {}
+) {
+  const mapped = mapGeminiTranscriptionError(error, fallbackMessage, fallbackStatus);
+  logger.error(`Gemini transcription ${stage} failed`, {
+    ...context,
+    mappedErrorCode: mapped.code,
+    mappedStatus: mapped.status,
+    mappedMessage: mapped.message,
+    rawError: error
+  });
+  return mapped;
+}
+
 export class GeminiTranscriptionProvider implements TranscriptionProvider {
   readonly name = "gemini";
 
@@ -222,7 +242,12 @@ export class GeminiTranscriptionProvider implements TranscriptionProvider {
         }
       });
     } catch (error) {
-      throw mapGeminiTranscriptionError(error, "Gemini file upload failed", 502);
+      throw logAndMapGeminiTranscriptionError("file upload", error, "Gemini file upload failed", 502, {
+        filePath: input.filePath,
+        mimeType: input.mimeType,
+        fileName: input.fileName,
+        sourceType: input.sourceType
+      });
     }
 
     try {
@@ -231,6 +256,9 @@ export class GeminiTranscriptionProvider implements TranscriptionProvider {
       if (!readyFile.uri || !readyFile.mimeType) {
         throw new ApiError("TRANSCRIPTION_FAILED", "Gemini did not return a usable media file URI", 502);
       }
+
+      const readyFileUri = readyFile.uri;
+      const readyFileMimeType = readyFile.mimeType;
 
       let content = "";
       const modelAttempts: string[] = [];
@@ -245,7 +273,7 @@ export class GeminiTranscriptionProvider implements TranscriptionProvider {
                 role: "user",
                 parts: [
                   createPartFromText(buildTranscriptionPrompt(input.languageHint)),
-                  createPartFromUri(readyFile.uri, readyFile.mimeType)
+                  createPartFromUri(readyFileUri, readyFileMimeType)
                 ]
               }
             ],
@@ -255,7 +283,12 @@ export class GeminiTranscriptionProvider implements TranscriptionProvider {
             }
           })
           .catch((error) => {
-            throw mapGeminiTranscriptionError(error, "Gemini transcription failed", 502);
+            throw logAndMapGeminiTranscriptionError("generate content", error, "Gemini transcription failed", 502, {
+              fileName: input.fileName,
+              mimeType: input.mimeType,
+              uploadedFileName: uploadedFile.name || null,
+              readyFileUriSuffix: readyFileUri.split("/").slice(-2).join("/")
+            });
           });
 
         content = extractTranscriptTextFromResponse(response);
@@ -267,7 +300,7 @@ export class GeminiTranscriptionProvider implements TranscriptionProvider {
         logger.error("Gemini transcription returned an empty response", {
           attempt,
           maxAttempts: 2,
-          ...buildEmptyResponseDebugMeta(response, uploadedFile.name || "", readyFile.uri)
+          ...buildEmptyResponseDebugMeta(response, uploadedFile.name || "", readyFileUri)
         });
       }
 

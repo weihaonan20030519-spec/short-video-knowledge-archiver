@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { MessageDictionary } from "../../../lib/i18n";
 import { getImportUiMessages } from "../../../lib/i18n";
 import {
@@ -12,6 +13,7 @@ import {
 import type { BrowserImportUiState } from "../../../features/create-record/createRecordImportUi";
 import type { AppLanguage } from "../../../types/domain";
 import type { ImportResult, ImportSession, ImportTrack } from "../../../services/import/importTypes";
+import { createRecordDebugLog, isCreateRecordDebugEnabled } from "./createRecordDebug";
 
 interface CreateRecordBrowserImportSectionProps {
   t: MessageDictionary;
@@ -44,6 +46,37 @@ export function CreateRecordBrowserImportSection({
   const visibleWarnings = getVisibleImportWarnings(importResult, appLanguage);
   const shouldRecommendTrackSelection =
     importSession.flowState === "awaiting_track_selection" && !hasDetectedImportContent(importResult);
+  const isCreateRecordDebug = isCreateRecordDebugEnabled();
+
+  useEffect(() => {
+    if (!isCreateRecordDebug) {
+      return;
+    }
+
+    createRecordDebugLog("browser.section.render", {
+      section: "browser_import",
+      browserNoticeGate: true,
+      browserImportState: browserImportState.status,
+      browserImportFlowState: importSession.flowState,
+      primaryMessage,
+      helperMessage,
+      importResultOutcome: importResult?.outcome || null,
+      importResultSource: importResult?.source || null,
+      visibleWarnings: visibleWarnings.map((warning) => warning.code),
+      trackCount: trackOptions.length,
+      selectedTrackId
+    });
+  }, [
+    browserImportState.status,
+    helperMessage,
+    importResult,
+    importSession.flowState,
+    isCreateRecordDebug,
+    primaryMessage,
+    selectedTrackId,
+    trackOptions.length,
+    visibleWarnings
+  ]);
 
   return (
     <div className="space-y-2 rounded-[24px] border border-slate-200 bg-slate-50/90 px-4 py-3">
