@@ -141,6 +141,9 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
     originalUrl: { lastValue: "" }
   });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const isBrowserImportMode = uiMode === "browser_import";
+  const browserImportRenderState =
+    isBrowserImportMode ? browserImportState : buildIdleBrowserImportState();
 
   const jumpToContentField = () => {
     const contentField = document.getElementById(CREATE_RECORD_CONTENT_FIELD_ID) as HTMLTextAreaElement | null;
@@ -291,6 +294,14 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
     setUiMode(nextMode);
     setValue("inputMethod", mapUiModeToInputMethod(nextMode), { shouldDirty: true });
   };
+
+  useEffect(() => {
+    if (!open || isBrowserImportMode || browserImportState.status === "idle") {
+      return;
+    }
+
+    setBrowserImportState(buildIdleBrowserImportState());
+  }, [browserImportState.status, isBrowserImportMode, open]);
 
   const triggerBrowserImport = async () => {
     setImportSession({
@@ -453,12 +464,7 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
   }, [open, originalUrl, uiMode]);
 
   useEffect(() => {
-    if (
-      !open ||
-      uiMode !== "browser_import" ||
-      browserImportState.status !== "waiting" ||
-      !browserImportState.sessionToken
-    ) {
+    if (!open || !isBrowserImportMode || browserImportState.status !== "waiting" || !browserImportState.sessionToken) {
       return;
     }
 
@@ -507,15 +513,15 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [appLanguage, browserImportState, importSession.result, open, uiMode]);
+  }, [appLanguage, browserImportState, importSession.result, isBrowserImportMode, open]);
 
   useEffect(() => {
-    if (!open || uiMode !== "browser_import" || browserImportState.status !== "idle") {
+    if (!open || !isBrowserImportMode || browserImportState.status !== "idle") {
       return;
     }
 
     void triggerBrowserImport();
-  }, [browserImportState.status, open, uiMode]);
+  }, [browserImportState.status, isBrowserImportMode, open]);
 
   useEffect(() => {
     if (!open || !importSession.result) {
@@ -661,7 +667,7 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
     ) : uiMode === "browser_import" ? (
       <CreateRecordBrowserImportSection
         appLanguage={appLanguage}
-        browserImportState={browserImportState}
+        browserImportState={browserImportRenderState}
         importResult={importResult}
         importSession={importSession}
         onTrackChange={(trackId) => {

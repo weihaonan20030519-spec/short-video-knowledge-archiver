@@ -449,6 +449,73 @@ describe("CreateRecordModal upload flow", () => {
     expect(screen.queryByText("通过浏览器扩展辅助导入当前页面上下文，再检查并补全文本内容。")).not.toBeInTheDocument();
   });
 
+  it("shows browser import notice only in browser mode and clears it after switching back to paste-link", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/import/browser-context/session") && init?.method === "POST") {
+        return {
+          json: async () => ({
+            success: true,
+            data: {
+              sessionToken: "browser-session-1",
+              expiresAt: "2026-04-11T12:00:00.000Z"
+            },
+            error: null
+          })
+        };
+      }
+
+      if (url.endsWith("/api/import/browser-context/session/browser-session-1")) {
+        return {
+          json: async () => ({
+            success: true,
+            data: {
+              sessionToken: "browser-session-1",
+              status: "pending",
+              expiresAt: "2026-04-11T12:00:00.000Z",
+              result: null
+            },
+            error: null
+          })
+        };
+      }
+
+      throw new Error(`Unexpected fetch url: ${url}`);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <CreateRecordModal
+        open
+        folders={[createFolder({ id: "folder-browser-switch", name: "收集箱" })]}
+        tags={[]}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "浏览器导入（Beta）" }));
+
+    expect(await screen.findByText("浏览器导入已启动")).toBeInTheDocument();
+    expect(
+      screen.getByText("请前往当前 B 站视频页并点击侧载扩展，扩展会把页面上下文提交回归档器。")
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "粘贴链接" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("浏览器导入已启动")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("请前往当前 B 站视频页并点击侧载扩展，扩展会把页面上下文提交回归档器。")
+      ).not.toBeInTheDocument();
+    });
+
+    expect(screen.getByText("链接辅助导入")).toBeInTheDocument();
+  });
+
   it("preserves user-edited fields on repeated paste-link imports unless the field still matches its last autofill snapshot", async () => {
     const fetchMock = vi
       .fn()
