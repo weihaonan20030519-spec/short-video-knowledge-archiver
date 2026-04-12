@@ -21,6 +21,7 @@ import {
 import { createArticleOcrProvider } from "./services/articleOcr/providerSelection.js";
 import { resolveAllowedAppOrigins } from "./utils/env.js";
 import { createHttpErrorResponse } from "./utils/httpErrorHandler.js";
+import { logger } from "./utils/logger.js";
 
 interface AppDependencies {
   analysisProvider?: AnalysisProvider;
@@ -33,12 +34,30 @@ function isLocalDevelopmentOrigin(origin: string) {
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
 }
 
+function isThisProjectsVercelOrigin(origin: string) {
+  return /^https:\/\/short-video-knowledge-archiver(?:-[a-z0-9]+)?\.vercel\.app$/i.test(origin);
+}
+
 export function isAllowedCorsOrigin(origin: string | undefined, allowedAppOrigins = resolveAllowedAppOrigins()) {
   if (!origin) {
     return true;
   }
 
-  return isLocalDevelopmentOrigin(origin) || allowedAppOrigins.includes(origin);
+  const isLocalOrigin = isLocalDevelopmentOrigin(origin);
+  const isPreviewOrigin = isThisProjectsVercelOrigin(origin);
+  const isConfiguredOrigin = allowedAppOrigins.includes(origin);
+  const allowed = isLocalOrigin || isPreviewOrigin || isConfiguredOrigin;
+
+  logger.info("CORS decision", {
+    origin,
+    allowedAppOrigins,
+    isLocalOrigin,
+    isPreviewOrigin,
+    isConfiguredOrigin,
+    allowed
+  });
+
+  return allowed;
 }
 
 export function createApp(dependencies: AppDependencies = {}) {

@@ -70,7 +70,29 @@ describe("app cors", () => {
     app(req, res);
     await finished;
 
-    expect(res.statusCode).toBeGreaterThanOrEqual(200);
+    expect(res.statusCode).toBe(204);
     expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:5175");
+    expect(res.headers["access-control-allow-methods"]).toContain("POST");
+    expect(res.headers["access-control-allow-headers"]).toContain("content-type");
+  });
+
+  it("returns cors headers for the current vercel preview origin", async () => {
+    const app = createApp();
+    const req = createOptionsRequest("https://short-video-knowledge-archiver-lw7l7wkkv.vercel.app");
+    const res = createResponseMock();
+
+    const finished = new Promise<void>((resolve) => {
+      res.once("finish", resolve);
+    });
+
+    app(req, res);
+    await finished;
+
+    expect(res.statusCode).toBe(204);
+    expect(res.headers["access-control-allow-origin"]).toBe(
+      "https://short-video-knowledge-archiver-lw7l7wkkv.vercel.app"
+    );
+    expect(res.headers["access-control-allow-methods"]).toContain("POST");
+    expect(res.headers["access-control-allow-headers"]).toContain("content-type");
   });
 });

@@ -12,8 +12,11 @@ describe("isAllowedCorsOrigin", () => {
     expect(isAllowedCorsOrigin("https://archiver.example.com", ["https://archiver.example.com"])).toBe(true);
   });
 
+  it("allows this project's vercel preview origins", () => {
+    expect(isAllowedCorsOrigin("https://short-video-knowledge-archiver-lw7l7wkkv.vercel.app", [])).toBe(true);
+  });
+
   it("rejects unknown remote origins", () => {
     expect(isAllowedCorsOrigin("https://unknown.example.com", ["https://archiver.example.com"])).toBe(false);
   });
 });
-
