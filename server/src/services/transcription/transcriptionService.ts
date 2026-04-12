@@ -102,13 +102,31 @@ export async function transcribeUploadedFile(
 
     cleanupTargets.push(...preprocessingResult.cleanupPaths);
 
-    const providerOutput = await dependencies.transcriptionProvider.transcribe({
+    const providerInput = {
       filePath: preprocessingResult.transcriptionInput.filePath,
       mimeType: preprocessingResult.transcriptionInput.mimeType,
       fileName: file.originalname,
       sourceType: validated.sourceType,
       languageHint: options.languageHint
-    }).catch((error) => {
+    } as const;
+
+    const providerOutput = await dependencies.transcriptionProvider.transcribe(providerInput).catch((error) => {
+      logger.error("Transcription provider failed", {
+        provider: dependencies.transcriptionProvider.name,
+        fileMeta: {
+          fileName: file.originalname,
+          mimeType: file.mimetype,
+          size: file.size
+        },
+        preprocessing: {
+          sourceType: validated.sourceType,
+          originalMimeType: file.mimetype,
+          normalizedMimeType: preprocessingResult.transcriptionInput.mimeType,
+          derivedFrom: preprocessingResult.transcriptionInput.derivedFrom,
+          transcriptionInputPath: providerInput.filePath
+        },
+        rawError: error
+      });
       throw attachFailureStage(error, "transcription");
     });
 

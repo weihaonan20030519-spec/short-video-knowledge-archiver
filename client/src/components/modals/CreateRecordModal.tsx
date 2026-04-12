@@ -59,6 +59,7 @@ import { CreateRecordModeSwitcher } from "./create-record/CreateRecordModeSwitch
 import { CreateRecordPrimaryFields } from "./create-record/CreateRecordPrimaryFields";
 import { CreateRecordSecondaryFields } from "./create-record/CreateRecordSecondaryFields";
 import { CreateRecordUploadSection } from "./create-record/CreateRecordUploadSection";
+import { createRecordDebugLog, isCreateRecordDebugEnabled } from "./create-record/createRecordDebug";
 
 interface CreateRecordModalProps {
   open: boolean;
@@ -143,6 +144,7 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const isBrowserImportMode = uiMode === "browser_import";
   const browserImportRenderState = isBrowserImportMode ? browserImportState : buildIdleBrowserImportState();
+  const isCreateRecordDebug = isCreateRecordDebugEnabled();
 
   const jumpToContentField = () => {
     const contentField = document.getElementById(CREATE_RECORD_CONTENT_FIELD_ID) as HTMLTextAreaElement | null;
@@ -281,6 +283,11 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
     }
 
     const transitionPlan = getCreateRecordModeTransitionPlan(uiMode, nextMode);
+    createRecordDebugLog("mode.change", {
+      previousMode: uiMode,
+      nextMode,
+      transitionPlan
+    });
 
     if (transitionPlan.resetUploadRuntime) {
       resetUploadRuntimeState();
@@ -295,12 +302,37 @@ export function CreateRecordModal({ open, folders, tags, onClose, onSubmit }: Cr
   };
 
   useEffect(() => {
+    if (isCreateRecordDebug) {
+      createRecordDebugLog("modal.snapshot", {
+        uiMode,
+        isBrowserImportMode,
+        renderedSection: uiMode,
+        inputMethod: mapUiModeToInputMethod(uiMode),
+        browserImportState: {
+          status: browserImportState.status,
+          sessionToken: browserImportState.sessionToken,
+          expiresAt: browserImportState.expiresAt,
+          startedAt: browserImportState.startedAt
+        },
+        browserImportRenderState: {
+          status: browserImportRenderState.status,
+          sessionToken: browserImportRenderState.sessionToken,
+          expiresAt: browserImportRenderState.expiresAt,
+          startedAt: browserImportRenderState.startedAt
+        },
+        linkImportUiState: derivePasteLinkImportUiState(importSession, hasAttemptedLinkImport),
+        importSessionFlowState: importSession.flowState,
+        importResultSource: importSession.result?.source || null,
+        browserNoticeGate: isBrowserImportMode
+      });
+    }
+
     if (!open || isBrowserImportMode || browserImportState.status === "idle") {
       return;
     }
 
     setBrowserImportState(buildIdleBrowserImportState());
-  }, [browserImportState.status, isBrowserImportMode, open]);
+  }, [browserImportState.status, browserImportRenderState, hasAttemptedLinkImport, importSession, isBrowserImportMode, isCreateRecordDebug, open, uiMode]);
 
   const triggerBrowserImport = async () => {
     setImportSession({

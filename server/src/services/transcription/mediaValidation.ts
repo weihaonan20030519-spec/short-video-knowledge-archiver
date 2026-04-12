@@ -38,6 +38,18 @@ function isVideoMimeType(mimeType: string) {
   return SUPPORTED_VIDEO_MIME_TYPES.includes(mimeType as (typeof SUPPORTED_VIDEO_MIME_TYPES)[number]);
 }
 
+function resolveAudioMimeType(extension: string, mimeType: string) {
+  if (extension === "m4a") {
+    return "audio/mp4";
+  }
+
+  if (isAudioMimeType(mimeType)) {
+    return mimeType;
+  }
+
+  return "audio/mpeg";
+}
+
 export function validateMediaFile(fileName: string, mimeType: string): ValidatedMediaFile | null {
   const extension = normalizeExtension(fileName);
   const normalizedMimeType = mimeType.toLowerCase();
@@ -48,7 +60,7 @@ export function validateMediaFile(fileName: string, mimeType: string): Validated
   ) {
     return {
       sourceType: "audio",
-      normalizedMimeType: isAudioMimeType(normalizedMimeType) ? normalizedMimeType : "audio/mpeg",
+      normalizedMimeType: resolveAudioMimeType(extension, normalizedMimeType),
       extension
     };
   }
